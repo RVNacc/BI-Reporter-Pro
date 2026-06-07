@@ -18,8 +18,15 @@ export default function ProfitLossReportsView() {
   const [period, setPeriod] = useState("");
   const [periods, setPeriods] = useState<any[]>([]);
 
+  const [statusFilter, setStatusFilter] = useState<"all" | "profit" | "loss">("all");
+  const [sortConfig, setSortConfig] = useState<{ key: string, direction: 'asc' | 'desc' } | null>(null);
+
   // Tabs: "day" | "range" | "hierarchy" | "charts"
   const [tab, setTab] = useState<"day" | "range" | "hierarchy" | "charts">("day");
+
+  useEffect(() => {
+     setSortConfig(null);
+  }, [tab, statusFilter]);
 
   useEffect(() => {
     fetch('/api/periods')
@@ -63,9 +70,47 @@ export default function ProfitLossReportsView() {
 
   const formatRial = (v: number) => Number(Math.round(v) || 0).toLocaleString();
 
-  const lossRowsDay = useMemo(() => {
-     return data.filter(r => r.status === 'loss' && r.qty > 0).sort((a,b) => a.totalProfitLoss - b.totalProfitLoss); // biggest loss first (most negative)
-  }, [data]);
+  const handleSort = (key: string) => {
+    let direction: 'asc' | 'desc' = 'desc';
+    if (sortConfig && sortConfig.key === key && sortConfig.direction === 'desc') {
+      direction = 'asc';
+    }
+    setSortConfig({ key, direction });
+  };
+
+  const getSortIcon = (key: string) => {
+      if (!sortConfig || sortConfig.key !== key) return <span className="text-slate-300 ml-1">↕</span>;
+      return sortConfig.direction === 'asc' ? <span className="text-blue-600 ml-1">↑</span> : <span className="text-blue-600 ml-1">↓</span>;
+  };
+
+  const applySortAndFilter = (arr: any[], profitCondition: (item: any) => boolean, lossCondition: (item: any) => boolean) => {
+      let result = [...arr];
+
+      if (statusFilter === 'profit') {
+          result = result.filter(profitCondition);
+      } else if (statusFilter === 'loss') {
+          result = result.filter(lossCondition);
+      }
+
+      if (sortConfig) {
+          result.sort((a, b) => {
+              const valA = a[sortConfig.key];
+              const valB = b[sortConfig.key];
+              if (valA < valB) return sortConfig.direction === 'asc' ? -1 : 1;
+              if (valA > valB) return sortConfig.direction === 'asc' ? 1 : -1;
+              return 0;
+          });
+      }
+      return result;
+  };
+
+  const dayRows = useMemo(() => {
+     let rows = data.filter(r => r.qty > 0);
+     if (!sortConfig) {
+         rows.sort((a,b) => a.totalProfitLoss - b.totalProfitLoss); // biggest loss first by default
+     }
+     return applySortAndFilter(rows, r => r.totalProfitLoss > 0, r => r.totalProfitLoss < 0);
+  }, [data, statusFilter, sortConfig]);
 
   const rangeAggregated = useMemo(() => {
      const agg: Record<string, any> = {};
@@ -78,8 +123,13 @@ export default function ProfitLossReportsView() {
         agg[r.code].totalProfitLoss += r.totalProfitLoss;
         agg[r.code].count += 1;
      });
-     return Object.values(agg).sort((a,b) => b.totalProfitLoss - a.totalProfitLoss);
-  }, [data]);
+     
+     let arr = Object.values(agg);
+     if (!sortConfig) {
+         arr.sort((a: any, b: any) => b.totalProfitLoss - a.totalProfitLoss);
+     }
+     return applySortAndFilter(arr, r => r.totalProfitLoss > 0, r => r.totalProfitLoss < 0);
+  }, [data, statusFilter, sortConfig]);
 
   const hierarchyAggregated = useMemo(() => {
       const l1Agg: Record<string, any> = {};
@@ -103,8 +153,19 @@ export default function ProfitLossReportsView() {
           if (r.totalProfitLoss < 0) l2Agg[l1+'::'+l2].loss += Math.abs(r.totalProfitLoss);
       });
 
-      return { l1: Object.values(l1Agg), l2: Object.values(l2Agg) };
-  }, [data]);
+      let l1 = Object.values(l1Agg);
+      let l2 = Object.values(l2Agg);
+      
+      if (!sortConfig) {
+          l1.sort((a: any, b: any) => b.net - a.net);
+          l2.sort((a: any, b: any) => b.net - a.net);
+      }
+
+      return { 
+          l1: applySortAndFilter(l1, r => r.net > 0, r => r.net < 0), 
+          l2: applySortAndFilter(l2, r => r.net > 0, r => r.net < 0) 
+      };
+  }, [data, statusFilter, sortConfig]);
 
   const chartData = useMemo(() => {
       const topProfits = [...rangeAggregated].filter(a => a.totalProfitLoss > 0).sort((a,b) => b.totalProfitLoss - a.totalProfitLoss).slice(0, 10);
@@ -164,7 +225,12 @@ export default function ProfitLossReportsView() {
           </h2>
           <p className="text-slate-500 text-sm mt-1">مشاهده و تحلیل میزان سود و زیان (مقایسه نرخ فروش با بهای تمام‌شده و آخرین خرید)</p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 flex-wrap">
+          <select className="border border-slate-300 rounded-lg px-3 py-2 text-sm outline-none bg-white min-w-[120px]" value={statusFilter} onChange={e => setStatusFilter(e.target.value as any)}>
+              <option value="all">همه موارد</option>
+              <option value="profit">فقط سودده</option>
+              <option value="loss">فقط زیان‌ده</option>
+          </select>
           <AdvancedPeriodFilter value={period} onChange={setPeriod} availableYears={periods.map((p:any) => p.value.startsWith('Y:') ? p.value.substring(2) : null).filter(Boolean) as string[]} />
           <button onClick={fetchData} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700">
               {loading ? "در حال دریافت..." : "اعمال فیلتر"}
@@ -175,7 +241,7 @@ export default function ProfitLossReportsView() {
 
       <div className="flex gap-2 border-b border-slate-200 mb-6 overflow-x-auto">
         <button onClick={() => setTab('day')} className={`px-4 py-3 text-sm font-medium whitespace-nowrap border-b-2 ${tab === 'day' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-800'}`}>
-           زیان‌های روزانه (جدول یک)
+           عملکرد روزانه (جدول یک)
         </button>
         <button onClick={() => setTab('range')} className={`px-4 py-3 text-sm font-medium whitespace-nowrap border-b-2 ${tab === 'range' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-800'}`}>
            روند دوره‌ای کالاها (جدول دو)
@@ -198,21 +264,21 @@ export default function ProfitLossReportsView() {
                <table className="w-full text-sm text-right whitespace-nowrap">
                    <thead className="bg-slate-100 text-slate-600 sticky top-0 z-10 shadow-sm text-xs border-b">
                        <tr>
-                           <th className="px-4 py-3 font-medium">تاریخ</th>
-                           <th className="px-4 py-3 font-medium">کد کالا</th>
-                           <th className="px-4 py-3 font-medium">نام کالا</th>
-                           <th className="px-4 py-3 font-medium">واحد</th>
-                           <th className="px-4 py-3 font-medium">تعداد فروش</th>
-                           <th className="px-4 py-3 font-medium">آخرین قیمت خرید</th>
-                           <th className="px-4 py-3 font-medium border-l border-slate-200">بهای تمام شده</th>
-                           <th className="px-4 py-3 font-medium border-l border-slate-200">نرخ فروش</th>
-                           <th className="px-4 py-3 font-medium">جمع خالص (فروش)</th>
-                           <th className="px-4 py-3 font-medium">فاصله زیان</th>
-                           <th className="px-4 py-3 font-medium">مبلغ زیان</th>
+                           <th className="px-4 py-3 font-medium cursor-pointer hover:bg-slate-200" onClick={() => handleSort('date')}>تاریخ {getSortIcon('date')}</th>
+                           <th className="px-4 py-3 font-medium cursor-pointer hover:bg-slate-200" onClick={() => handleSort('code')}>کد کالا {getSortIcon('code')}</th>
+                           <th className="px-4 py-3 font-medium cursor-pointer hover:bg-slate-200" onClick={() => handleSort('name')}>نام کالا {getSortIcon('name')}</th>
+                           <th className="px-4 py-3 font-medium cursor-pointer hover:bg-slate-200" onClick={() => handleSort('unit')}>واحد {getSortIcon('unit')}</th>
+                           <th className="px-4 py-3 font-medium cursor-pointer hover:bg-slate-200" onClick={() => handleSort('qty')}>تعداد فروش {getSortIcon('qty')}</th>
+                           <th className="px-4 py-3 font-medium cursor-pointer hover:bg-slate-200" onClick={() => handleSort('lastPurchasePrice')}>آخرین قیمت خرید {getSortIcon('lastPurchasePrice')}</th>
+                           <th className="px-4 py-3 font-medium border-l border-slate-200 cursor-pointer hover:bg-slate-200" onClick={() => handleSort('costPrice')}>بهای تمام شده {getSortIcon('costPrice')}</th>
+                           <th className="px-4 py-3 font-medium border-l border-slate-200 cursor-pointer hover:bg-slate-200" onClick={() => handleSort('price')}>نرخ فروش {getSortIcon('price')}</th>
+                           <th className="px-4 py-3 font-medium cursor-pointer hover:bg-slate-200" onClick={() => handleSort('totalSales')}>جمع خالص (فروش) {getSortIcon('totalSales')}</th>
+                           <th className="px-4 py-3 font-medium cursor-pointer hover:bg-slate-200" onClick={() => handleSort('profitLossPerUnit')}>فاصله سود/زیان {getSortIcon('profitLossPerUnit')}</th>
+                           <th className="px-4 py-3 font-medium cursor-pointer hover:bg-slate-200" onClick={() => handleSort('totalProfitLoss')}>مبلغ سود/زیان {getSortIcon('totalProfitLoss')}</th>
                        </tr>
                    </thead>
                    <tbody className="divide-y divide-slate-100">
-                       {lossRowsDay.map((r, i) => (
+                       {dayRows.map((r, i) => (
                            <tr key={i} className="hover:bg-slate-50">
                                <td className="px-4 py-2 text-slate-500" dir="ltr">{r.date}</td>
                                <td className="px-4 py-2 font-mono text-xs">{r.code}</td>
@@ -223,12 +289,12 @@ export default function ProfitLossReportsView() {
                                <td className="px-4 py-2 border-l border-slate-100 bg-slate-50/50">{formatRial(r.costPrice)}</td>
                                <td className="px-4 py-2 text-slate-800 font-medium border-l border-slate-100 bg-blue-50/30">{formatRial(r.price)}</td>
                                <td className="px-4 py-2">{formatRial(r.totalSales)}</td>
-                               <td className="px-4 py-2">{formatRial(Math.abs(r.profitLossPerUnit))}</td>
-                               <td className="px-4 py-2 font-medium text-rose-600">{formatRial(Math.abs(r.totalProfitLoss))}</td>
+                               <td className="px-4 py-2" dir="ltr">{formatRial(r.profitLossPerUnit)}</td>
+                               <td className={`px-4 py-2 font-medium ${r.totalProfitLoss > 0 ? "text-emerald-600" : (r.totalProfitLoss < 0 ? "text-rose-600" : "text-slate-500")}`} dir="ltr">{formatRial(r.totalProfitLoss)}</td>
                            </tr>
                        ))}
-                       {lossRowsDay.length === 0 && (
-                           <tr><td colSpan={11} className="py-8 text-center text-slate-500">داده زیان‌دهی در این تاریخ یافت نشد</td></tr>
+                       {dayRows.length === 0 && (
+                           <tr><td colSpan={11} className="py-8 text-center text-slate-500">داده‌ای متناسب با فیلتر یافت نشد</td></tr>
                        )}
                    </tbody>
                </table>
@@ -253,14 +319,14 @@ export default function ProfitLossReportsView() {
                <table className="w-full text-sm text-right whitespace-nowrap">
                    <thead className="bg-slate-100 text-slate-600 sticky top-0 z-10 shadow-sm text-xs border-b">
                        <tr>
-                           <th className="px-4 py-3 font-medium">کد کالا</th>
-                           <th className="px-4 py-3 font-medium">نام کالا</th>
-                           <th className="px-4 py-3 font-medium">گروه اصلی</th>
-                           <th className="px-4 py-3 font-medium">دفعات فروش (تعداد رکورد)</th>
-                           <th className="px-4 py-3 font-medium">تعداد کل فروخته شده</th>
-                           <th className="px-4 py-3 font-medium">جمع فروش</th>
+                           <th className="px-4 py-3 font-medium cursor-pointer hover:bg-slate-200" onClick={() => handleSort('code')}>کد کالا {getSortIcon('code')}</th>
+                           <th className="px-4 py-3 font-medium cursor-pointer hover:bg-slate-200" onClick={() => handleSort('name')}>نام کالا {getSortIcon('name')}</th>
+                           <th className="px-4 py-3 font-medium cursor-pointer hover:bg-slate-200" onClick={() => handleSort('l1')}>گروه اصلی {getSortIcon('l1')}</th>
+                           <th className="px-4 py-3 font-medium cursor-pointer hover:bg-slate-200" onClick={() => handleSort('count')}>دفعات فروش {getSortIcon('count')}</th>
+                           <th className="px-4 py-3 font-medium cursor-pointer hover:bg-slate-200" onClick={() => handleSort('qty')}>تعداد کل فروخته شده {getSortIcon('qty')}</th>
+                           <th className="px-4 py-3 font-medium cursor-pointer hover:bg-slate-200" onClick={() => handleSort('totalSales')}>جمع فروش {getSortIcon('totalSales')}</th>
                            <th className="px-4 py-3 font-medium">وضعیت</th>
-                           <th className="px-4 py-3 font-medium">سود/زیان کل</th>
+                           <th className="px-4 py-3 font-medium cursor-pointer hover:bg-slate-200" onClick={() => handleSort('totalProfitLoss')}>سود/زیان کل {getSortIcon('totalProfitLoss')}</th>
                        </tr>
                    </thead>
                    <tbody className="divide-y divide-slate-100">
@@ -299,11 +365,11 @@ export default function ProfitLossReportsView() {
                     <table className="w-full text-sm text-right">
                         <thead className="bg-slate-100/50 text-slate-500">
                             <tr>
-                                <th className="p-3">گروه اصلی</th>
-                                <th className="p-3">جمع فروش</th>
-                                <th className="p-3 text-emerald-600">سود حاصله</th>
-                                <th className="p-3 text-rose-600">زیان وارده</th>
-                                <th className="p-3 font-bold">برآیند خالص</th>
+                                <th className="p-3 cursor-pointer hover:bg-slate-200" onClick={() => handleSort('name')}>گروه اصلی {getSortIcon('name')}</th>
+                                <th className="p-3 cursor-pointer hover:bg-slate-200" onClick={() => handleSort('totalSales')}>جمع فروش {getSortIcon('totalSales')}</th>
+                                <th className="p-3 text-emerald-600 cursor-pointer hover:bg-slate-200" onClick={() => handleSort('profit')}>سود حاصله {getSortIcon('profit')}</th>
+                                <th className="p-3 text-rose-600 cursor-pointer hover:bg-slate-200" onClick={() => handleSort('loss')}>زیان وارده {getSortIcon('loss')}</th>
+                                <th className="p-3 font-bold cursor-pointer hover:bg-slate-200" onClick={() => handleSort('net')}>برآیند خالص {getSortIcon('net')}</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
@@ -327,12 +393,12 @@ export default function ProfitLossReportsView() {
                     <table className="w-full text-sm text-right">
                         <thead className="bg-slate-100/50 text-slate-500 sticky top-0 z-10 shadow-sm">
                             <tr>
-                                <th className="p-3">گروه اصلی</th>
-                                <th className="p-3">زیر گروه</th>
-                                <th className="p-3">جمع فروش</th>
-                                <th className="p-3 text-emerald-600">سود حاصله</th>
-                                <th className="p-3 text-rose-600">زیان وارده</th>
-                                <th className="p-3 font-bold">برآیند خالص</th>
+                                <th className="p-3 cursor-pointer hover:bg-slate-200" onClick={() => handleSort('l1')}>گروه اصلی {getSortIcon('l1')}</th>
+                                <th className="p-3 cursor-pointer hover:bg-slate-200" onClick={() => handleSort('l2')}>زیر گروه {getSortIcon('l2')}</th>
+                                <th className="p-3 cursor-pointer hover:bg-slate-200" onClick={() => handleSort('totalSales')}>جمع فروش {getSortIcon('totalSales')}</th>
+                                <th className="p-3 text-emerald-600 cursor-pointer hover:bg-slate-200" onClick={() => handleSort('profit')}>سود حاصله {getSortIcon('profit')}</th>
+                                <th className="p-3 text-rose-600 cursor-pointer hover:bg-slate-200" onClick={() => handleSort('loss')}>زیان وارده {getSortIcon('loss')}</th>
+                                <th className="p-3 font-bold cursor-pointer hover:bg-slate-200" onClick={() => handleSort('net')}>برآیند خالص {getSortIcon('net')}</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
