@@ -1,0 +1,8 @@
+{
+  "name": "Remix: Bi reporter_pro",
+  "description": "",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
