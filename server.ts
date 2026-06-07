@@ -6,7 +6,7 @@ import multer from "multer";
 import * as xlsx from "xlsx";
 import fs from "fs";
 import cors from "cors";
-import * as jalaali from "jalaali-js";
+import jalaali from "jalaali-js";
 
 const app = express();
 const PORT = 3000;
@@ -35,6 +35,23 @@ db.function('isInPeriod', (dateStr, periodStr) => {
   const y = parseInt(match[1], 10);
   const m = parseInt(match[2], 10);
   const mStr = m.toString().padStart(2, '0');
+  
+  if (periodStr.startsWith('ADV:')) {
+     const pOptions = periodStr.substring(4).split('|');
+     const targetY = pOptions[0] ? parseInt(pOptions[0], 10) : null;
+     const targetM = pOptions[1] ? parseInt(pOptions[1], 10) : null;
+     const targetW = pOptions[2] ? parseInt(pOptions[2], 10) : null;
+     const d = match[4] ? parseInt(match[4], 10) : 1;
+     
+     if (targetY !== null && !isNaN(targetY) && y !== targetY) return 0;
+     if (targetM !== null && !isNaN(targetM) && m !== targetM) return 0;
+     if (targetW !== null && !isNaN(targetW)) {
+        const dayOfYear = m <= 6 ? (m - 1) * 31 + d : 186 + (m - 7) * 30 + d;
+        const weekOfYear = Math.floor((dayOfYear - 1) / 7) + 1;
+        if (weekOfYear !== targetW) return 0;
+     }
+     return 1;
+  }
   
   if (periodStr.startsWith('Y:')) {
      return periodStr.substring(2) === y.toString() ? 1 : 0;
@@ -834,7 +851,7 @@ app.get("/api/reports/pareto", (req, res) => {
     const period = (req.query.period as string) || "";
     // Interval settings for invoice classification
     const intervalSettingsStr = (req.query.intervalSettings as string);
-    let intervalSettings = { enabled: false, min: 0, max: 10000000, step: 1000000 };
+    let intervalSettings: any = { enabled: false, min: 0, max: 10000000, step: 1000000 };
     if (intervalSettingsStr) {
       try {
         intervalSettings = { enabled: true, ...JSON.parse(intervalSettingsStr) };

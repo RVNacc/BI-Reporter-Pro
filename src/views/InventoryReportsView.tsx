@@ -1,3 +1,4 @@
+import AdvancedPeriodFilter from "../components/AdvancedPeriodFilter";
 import React, { useState, useEffect } from "react";
 import {
   Archive,
@@ -83,24 +84,7 @@ export default function InventoryReportsView() {
         </div>
          <div className="flex items-center gap-4">
           <ExportPrintButtons moduleName="purchases" period={period} fileName="Inventory_Report" />
-          <div className="flex items-center gap-2 bg-white border border-slate-200 px-3 py-1.5 rounded-lg text-sm text-slate-700 shadow-sm relative">
-            <Calendar size={18} className="text-slate-400" />
-            <select
-              className="bg-transparent outline-none appearance-none pr-2 min-w-[120px] font-medium text-slate-700 cursor-pointer"
-              value={period}
-              onChange={(e) => setPeriod(e.target.value)}
-            >
-              {periods.map((p) => (
-                <option key={p.value} value={p.value}>
-                  {p.label}
-                </option>
-              ))}
-            </select>
-            <ChevronDown
-              size={14}
-              className="text-slate-400 absolute left-3 pointer-events-none"
-            />
-          </div>
+          <AdvancedPeriodFilter value={period} onChange={setPeriod} availableYears={periods.map((p:any) => p.value.startsWith('Y:') ? p.value.substring(2) : null).filter(Boolean) as string[]} />
         </div>
       </div>
 
@@ -137,7 +121,7 @@ export default function InventoryReportsView() {
                      <ResponsiveContainer width="100%" height="100%">
                         <BarChart data={data.retL1?.slice(0,5)} margin={{top:10, left:20, right:20, bottom:0}}>
                            <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                           <XAxis dataKey="name" angle={-90} textAnchor="end" height={160} tickFormatter={(v) => v && String(v).length > 25 ? String(v).substring(0, 25) + "..." : v} tick={{fontSize: 12, fontWeight: "bold", dy: 10, fill: "#475569"}} interval={0} axisLine={false} tickLine={false} />
+                           <XAxis dataKey="name" angle={-90} textAnchor="start" height={160} tickFormatter={(v) => v && String(v).length > 25 ? String(v).substring(0, 25) + "..." : v} tick={{fontSize: 12, fontWeight: "bold", dy: 10, fill: "#475569"}} interval={0} axisLine={false} tickLine={false} />
                            <YAxis hide />
                            <RechartsTooltip formatter={(v:number)=>formatRial(v)}/>
                            <Bar dataKey="amt" name="ارزش ریالی مرجوعی" fill="#ef4444" radius={[4,4,0,0]} />
@@ -150,7 +134,7 @@ export default function InventoryReportsView() {
                      <ResponsiveContainer width="100%" height="100%">
                         <LineChart data={data.retL2?.slice(0,5)} margin={{top:10, left:20, right:20, bottom:0}}>
                            <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                           <XAxis dataKey="name" angle={-90} textAnchor="end" height={160} tickFormatter={(v) => v && String(v).length > 25 ? String(v).substring(0, 25) + "..." : v} tick={{fontSize: 12, fontWeight: "bold", dy: 10, fill: "#475569"}} interval={0} axisLine={false} tickLine={false} />
+                           <XAxis dataKey="name" angle={-90} textAnchor="start" height={160} tickFormatter={(v) => v && String(v).length > 25 ? String(v).substring(0, 25) + "..." : v} tick={{fontSize: 12, fontWeight: "bold", dy: 10, fill: "#475569"}} interval={0} axisLine={false} tickLine={false} />
                            <YAxis hide />
                            <RechartsTooltip formatter={(v:number)=>formatQty(v)}/>
                            <Line type="monotone" dataKey="qty" stroke="#f59e0b" strokeWidth={3} dot={{r:4}} name="تعداد مرجوعی" />

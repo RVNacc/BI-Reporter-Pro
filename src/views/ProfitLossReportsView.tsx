@@ -1,3 +1,4 @@
+import AdvancedPeriodFilter from "../components/AdvancedPeriodFilter";
 import React, { useState, useEffect, useMemo } from "react";
 import { 
   BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, 
@@ -164,10 +165,7 @@ export default function ProfitLossReportsView() {
           <p className="text-slate-500 text-sm mt-1">مشاهده و تحلیل میزان سود و زیان (مقایسه نرخ فروش با بهای تمام‌شده و آخرین خرید)</p>
         </div>
         <div className="flex items-center gap-3">
-          <select className="border border-slate-300 rounded-lg px-3 py-2 text-sm outline-none w-40 disabled:opacity-50" value={period} onChange={e => setPeriod(e.target.value)} disabled={loading}>
-            <option value="">همه دوره‌ها</option>
-            {periods.map((p: any) => <option key={p.value} value={p.value}>{p.label}</option>)}
-          </select>
+          <AdvancedPeriodFilter value={period} onChange={setPeriod} availableYears={periods.map((p:any) => p.value.startsWith('Y:') ? p.value.substring(2) : null).filter(Boolean) as string[]} />
           <button onClick={fetchData} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700">
               {loading ? "در حال دریافت..." : "اعمال فیلتر"}
           </button>
@@ -200,33 +198,33 @@ export default function ProfitLossReportsView() {
                <table className="w-full text-sm text-right whitespace-nowrap">
                    <thead className="bg-slate-100 text-slate-600 sticky top-0 z-10 shadow-sm text-xs border-b">
                        <tr>
-                           <th className="px-4 py-3 font-medium">مبلغ زیان</th>
-                           <th className="px-4 py-3 font-medium">فاصله زیان</th>
-                           <th className="px-4 py-3 font-medium">بهای تمام شده</th>
-                           <th className="px-4 py-3 font-medium">آخرین قیمت خرید</th>
-                           <th className="px-4 py-3 font-medium">جمع خالص (فروش)</th>
-                           <th className="px-4 py-3 font-medium">نرخ فروش</th>
-                           <th className="px-4 py-3 font-medium">تعداد فروش</th>
-                           <th className="px-4 py-3 font-medium">واحد</th>
-                           <th className="px-4 py-3 font-medium">نام کالا</th>
-                           <th className="px-4 py-3 font-medium">کد کالا</th>
                            <th className="px-4 py-3 font-medium">تاریخ</th>
+                           <th className="px-4 py-3 font-medium">کد کالا</th>
+                           <th className="px-4 py-3 font-medium">نام کالا</th>
+                           <th className="px-4 py-3 font-medium">واحد</th>
+                           <th className="px-4 py-3 font-medium">تعداد فروش</th>
+                           <th className="px-4 py-3 font-medium">آخرین قیمت خرید</th>
+                           <th className="px-4 py-3 font-medium border-l border-slate-200">بهای تمام شده</th>
+                           <th className="px-4 py-3 font-medium border-l border-slate-200">نرخ فروش</th>
+                           <th className="px-4 py-3 font-medium">جمع خالص (فروش)</th>
+                           <th className="px-4 py-3 font-medium">فاصله زیان</th>
+                           <th className="px-4 py-3 font-medium">مبلغ زیان</th>
                        </tr>
                    </thead>
                    <tbody className="divide-y divide-slate-100">
                        {lossRowsDay.map((r, i) => (
                            <tr key={i} className="hover:bg-slate-50">
-                               <td className="px-4 py-2 font-medium text-rose-600">{formatRial(Math.abs(r.totalProfitLoss))}</td>
-                               <td className="px-4 py-2">{formatRial(Math.abs(r.profitLossPerUnit))}</td>
-                               <td className="px-4 py-2">{formatRial(r.costPrice)}</td>
-                               <td className="px-4 py-2">{formatRial(r.lastPurchasePrice)}</td>
-                               <td className="px-4 py-2">{formatRial(r.totalSales)}</td>
-                               <td className="px-4 py-2 text-slate-800 font-medium">{formatRial(r.price)}</td>
-                               <td className="px-4 py-2 text-center" dir="ltr">{formatRial(r.qty)}</td>
-                               <td className="px-4 py-2 text-slate-500">{r.unit}</td>
-                               <td className="px-4 py-2">{r.name}</td>
-                               <td className="px-4 py-2 font-mono text-xs">{r.code}</td>
                                <td className="px-4 py-2 text-slate-500" dir="ltr">{r.date}</td>
+                               <td className="px-4 py-2 font-mono text-xs">{r.code}</td>
+                               <td className="px-4 py-2">{r.name}</td>
+                               <td className="px-4 py-2 text-slate-500">{r.unit}</td>
+                               <td className="px-4 py-2 text-center" dir="ltr">{formatRial(r.qty)}</td>
+                               <td className="px-4 py-2 bg-slate-50/50">{formatRial(r.lastPurchasePrice)}</td>
+                               <td className="px-4 py-2 border-l border-slate-100 bg-slate-50/50">{formatRial(r.costPrice)}</td>
+                               <td className="px-4 py-2 text-slate-800 font-medium border-l border-slate-100 bg-blue-50/30">{formatRial(r.price)}</td>
+                               <td className="px-4 py-2">{formatRial(r.totalSales)}</td>
+                               <td className="px-4 py-2">{formatRial(Math.abs(r.profitLossPerUnit))}</td>
+                               <td className="px-4 py-2 font-medium text-rose-600">{formatRial(Math.abs(r.totalProfitLoss))}</td>
                            </tr>
                        ))}
                        {lossRowsDay.length === 0 && (
@@ -255,31 +253,31 @@ export default function ProfitLossReportsView() {
                <table className="w-full text-sm text-right whitespace-nowrap">
                    <thead className="bg-slate-100 text-slate-600 sticky top-0 z-10 shadow-sm text-xs border-b">
                        <tr>
-                           <th className="px-4 py-3 font-medium">سود/زیان کل</th>
-                           <th className="px-4 py-3 font-medium">وضعیت</th>
-                           <th className="px-4 py-3 font-medium">جمع فروش</th>
-                           <th className="px-4 py-3 font-medium">تعداد کل فروخته شده</th>
-                           <th className="px-4 py-3 font-medium">دفعات فروش (تعداد رکورد)</th>
-                           <th className="px-4 py-3 font-medium">گروه اصلی</th>
-                           <th className="px-4 py-3 font-medium">نام کالا</th>
                            <th className="px-4 py-3 font-medium">کد کالا</th>
+                           <th className="px-4 py-3 font-medium">نام کالا</th>
+                           <th className="px-4 py-3 font-medium">گروه اصلی</th>
+                           <th className="px-4 py-3 font-medium">دفعات فروش (تعداد رکورد)</th>
+                           <th className="px-4 py-3 font-medium">تعداد کل فروخته شده</th>
+                           <th className="px-4 py-3 font-medium">جمع فروش</th>
+                           <th className="px-4 py-3 font-medium">وضعیت</th>
+                           <th className="px-4 py-3 font-medium">سود/زیان کل</th>
                        </tr>
                    </thead>
                    <tbody className="divide-y divide-slate-100">
                        {rangeAggregated.map((r, i) => (
                            <tr key={i} className={`hover:bg-slate-50`}>
-                               <td className={`px-4 py-2 font-bold ${r.totalProfitLoss > 0 ? "text-emerald-600" : (r.totalProfitLoss < 0 ? "text-rose-600" : "text-slate-500")}`} dir="ltr">
-                                  {formatRial(r.totalProfitLoss)}
-                               </td>
+                               <td className="px-4 py-2 font-mono text-xs text-slate-500">{r.code}</td>
+                               <td className="px-4 py-2">{r.name}</td>
+                               <td className="px-4 py-2 text-slate-600">{r.l1}</td>
+                               <td className="px-4 py-2 text-center">{formatRial(r.count)}</td>
+                               <td className="px-4 py-2 text-center" dir="ltr">{formatRial(r.qty)}</td>
+                               <td className="px-4 py-2">{formatRial(r.totalSales)}</td>
                                <td className="px-4 py-2">
                                   {r.totalProfitLoss > 0 ? <span className="text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded text-xs">سودده</span> : (r.totalProfitLoss < 0 ? <span className="text-rose-600 bg-rose-50 px-2 py-0.5 rounded text-xs">زیان‌ده</span> : <span className="text-slate-500 bg-slate-100 px-2 py-0.5 rounded text-xs">سربه‌سر</span>)}
                                </td>
-                               <td className="px-4 py-2">{formatRial(r.totalSales)}</td>
-                               <td className="px-4 py-2 text-center" dir="ltr">{formatRial(r.qty)}</td>
-                               <td className="px-4 py-2 text-center">{formatRial(r.count)}</td>
-                               <td className="px-4 py-2 text-slate-600">{r.l1}</td>
-                               <td className="px-4 py-2">{r.name}</td>
-                               <td className="px-4 py-2 font-mono text-xs text-slate-500">{r.code}</td>
+                               <td className={`px-4 py-2 font-bold ${r.totalProfitLoss > 0 ? "text-emerald-600" : (r.totalProfitLoss < 0 ? "text-rose-600" : "text-slate-500")}`} dir="ltr">
+                                  {formatRial(r.totalProfitLoss)}
+                               </td>
                            </tr>
                        ))}
                    </tbody>
@@ -395,7 +393,7 @@ export default function ProfitLossReportsView() {
                    <ResponsiveContainer width="100%" height="85%">
                        <ComposedChart data={hierarchyAggregated.l1} margin={{top: 20, right: 20, left: 20, bottom: 20}}>
                           <CartesianGrid strokeDasharray="3 3" vertical={false} opacity={0.4} />
-                          <XAxis dataKey="name" angle={-90} textAnchor="end" height={160} tick={{fontSize: 12, fontWeight: "bold", dy: 10, fill: "#475569"}} interval={0} axisLine={false} tickLine={false} />
+                          <XAxis dataKey="name" angle={-90} textAnchor="start" height={160} tick={{fontSize: 12, fontWeight: "bold", dy: 10, fill: "#475569"}} interval={0} axisLine={false} tickLine={false} />
                           <YAxis tickFormatter={(v) => (v / 1000000).toFixed(0) + "M"} width={60} />
                           <RechartsTooltip formatter={(v: number) => formatRial(v) + " ریال"} />
                           <Legend verticalAlign="top" />
@@ -418,8 +416,6 @@ export default function ProfitLossReportsView() {
                              cx="50%" 
                              cy="50%" 
                              outerRadius={80}
-                             labelLine={true}
-                             label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
                           >
                               {chartData.statusCounts.map((entry, index) => (
                                   <Cell key={`cell-${index}`} fill={entry.color} />

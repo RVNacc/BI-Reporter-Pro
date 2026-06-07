@@ -1,3 +1,4 @@
+import AdvancedPeriodFilter from "../components/AdvancedPeriodFilter";
 import React, { useState, useEffect } from "react";
 import {
   Users,
@@ -62,24 +63,7 @@ export default function HrReportsView() {
         </div>
         <div className="flex items-center gap-4">
           <ExportPrintButtons moduleName="hr" period={period} fileName="HR_Report" />
-          <div className="flex items-center gap-2 bg-white border border-slate-200 px-3 py-1.5 rounded-lg text-sm text-slate-700 shadow-sm relative">
-            <Calendar size={18} className="text-slate-400" />
-            <select
-              className="bg-transparent outline-none appearance-none pr-2 min-w-[120px] font-medium text-slate-700 cursor-pointer"
-              value={period}
-              onChange={(e) => setPeriod(e.target.value)}
-            >
-              {periods.map((p) => (
-                <option key={p.value} value={p.value}>
-                  {p.label}
-                </option>
-              ))}
-            </select>
-            <ChevronDown
-              size={14}
-              className="text-slate-400 absolute left-3 pointer-events-none"
-            />
-          </div>
+          <AdvancedPeriodFilter value={period} onChange={setPeriod} availableYears={periods.map((p:any) => p.value.startsWith('Y:') ? p.value.substring(2) : null).filter(Boolean) as string[]} />
         </div>
       </div>
 

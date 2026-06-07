@@ -1,3 +1,4 @@
+import AdvancedPeriodFilter from "../components/AdvancedPeriodFilter";
 import React, { useState, useEffect } from "react";
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, ResponsiveContainer, Tooltip as RechartsTooltip, Legend } from "recharts";
 
@@ -76,10 +77,7 @@ export function WeeklyReportsView() {
           <p className="text-sm text-slate-500 mt-1">مقایسه فروش در هفته‌های مختلف</p>
         </div>
         <div className="flex items-center gap-3">
-          <select className="border border-slate-300 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500" value={period} onChange={e => setPeriod(e.target.value)}>
-            <option value="">همه دوره‌ها</option>
-            {periods.map((p: any) => <option key={p.value} value={p.value}>{p.label}</option>)}
-          </select>
+          <AdvancedPeriodFilter value={period} onChange={setPeriod} availableYears={periods.map((p:any) => p.value.startsWith('Y:') ? p.value.substring(2) : null).filter(Boolean) as string[]} />
           <div className="bg-slate-100 p-1 flex rounded-lg">
              <button onClick={() => setMode("amt")} className={`px-4 py-1.5 text-sm rounded ${mode === "amt" ? "bg-white shadow text-blue-600 font-medium" : "text-slate-600 hover:text-slate-800"}`}>ریالی</button>
              <button onClick={() => setMode("qty")} className={`px-4 py-1.5 text-sm rounded ${mode === "qty" ? "bg-white shadow text-blue-600 font-medium" : "text-slate-600 hover:text-slate-800"}`}>تعدادی</button>
@@ -94,7 +92,7 @@ export function WeeklyReportsView() {
              <ResponsiveContainer width="100%" height="100%">
                  <LineChart data={chartData} margin={{top:10, left:20, right:20, bottom:0}}>
                     <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                    <XAxis dataKey="weekName" angle={-90} textAnchor="end" height={100} tick={{fontSize: 12, fontWeight: "bold", dy: 10, fill: "#475569"}} interval={0} axisLine={false} tickLine={false} />
+                    <XAxis dataKey="weekName" angle={-90} textAnchor="start" height={100} tick={{fontSize: 12, fontWeight: "bold", dy: 10, fill: "#475569"}} interval={0} axisLine={false} tickLine={false} />
                     <YAxis hide />
                     <RechartsTooltip formatter={(v:number)=> mode === 'amt' ? formatRial(v) : formatQty(v)}/>
                     <Line type="monotone" dataKey={mode === 'amt' ? 'netAmt' : 'netQty'} stroke="#3b82f6" strokeWidth={3} dot={{r: 4}} />
@@ -106,7 +104,7 @@ export function WeeklyReportsView() {
              <ResponsiveContainer width="100%" height="100%">
                  <BarChart data={chartData} margin={{top:10, left:20, right:20, bottom:0}}>
                     <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                    <XAxis dataKey="weekName" angle={-90} textAnchor="end" height={100} tick={{fontSize: 12, fontWeight: "bold", dy: 10, fill: "#475569"}} interval={0} axisLine={false} tickLine={false} />
+                    <XAxis dataKey="weekName" angle={-90} textAnchor="start" height={100} tick={{fontSize: 12, fontWeight: "bold", dy: 10, fill: "#475569"}} interval={0} axisLine={false} tickLine={false} />
                     <YAxis hide />
                     <RechartsTooltip formatter={(v:number)=> mode === 'amt' ? formatRial(v) : formatQty(v)}/>
                     <Bar dataKey={mode === 'amt' ? 'netAmt' : 'netQty'} fill="#10b981" radius={[4,4,0,0]} />

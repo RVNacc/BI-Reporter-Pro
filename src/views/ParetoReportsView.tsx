@@ -1,3 +1,4 @@
+import AdvancedPeriodFilter from "../components/AdvancedPeriodFilter";
 import React, { useState, useEffect } from 'react';
 import { ResponsiveContainer, ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts';
 import { Filter, BarChart3, TrendingDown, TrendingUp, Layers } from 'lucide-react';
@@ -52,7 +53,7 @@ export default function ParetoReportsView() {
               <ResponsiveContainer width="100%" height="100%">
                  <ComposedChart data={topN} margin={{ top: 20, right: 20, bottom: 20, left: 20 }}>
                     <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
-                    <XAxis dataKey={nameKey} angle={-90} textAnchor="end" height={180} tickFormatter={(v) => v && v.length > 30 ? v.substring(0, 30) + '...' : v} tick={{fontSize: 12, fontWeight: 'bold', dy: 10, fill: '#1e293b'}} interval={0} />
+                    <XAxis dataKey={nameKey} angle={-90} textAnchor="start" height={180} tickFormatter={(v) => v && v.length > 30 ? v.substring(0, 30) + '...' : v} tick={{fontSize: 12, fontWeight: 'bold', dy: 10, fill: '#1e293b'}} interval={0} />
                     <YAxis yAxisId="left" tickFormatter={(v) => (v).toLocaleString()} />
                     <YAxis yAxisId="right" orientation="right" tickFormatter={(v) => v + '%'} />
                     <Tooltip formatter={(val: number, name: string) => [name === 'درصد تجمعی' ? val.toFixed(2) + '%' : val.toLocaleString(), name]} />
@@ -79,15 +80,7 @@ export default function ParetoReportsView() {
         <div className="flex items-center gap-3 bg-white p-2 rounded-lg shadow-sm border border-slate-200">
           <ExportPrintButtons moduleName="sales" period={period} fileName="Pareto_Report" />
           <Filter size={18} className="text-slate-400" />
-          <select 
-            className="bg-transparent border-none text-sm focus:ring-0 text-slate-700 font-medium"
-            value={period}
-            onChange={(e) => setPeriod(e.target.value)}
-          >
-            {availablePeriods.map((p, i) => (
-              <option key={i} value={p.value}>{p.label}</option>
-            ))}
-          </select>
+          <AdvancedPeriodFilter value={period} onChange={setPeriod} availableYears={availablePeriods.map((p:any) => p.value.startsWith('Y:') ? p.value.substring(2) : null).filter(Boolean) as string[]} />
         </div>
       </div>
 
@@ -279,7 +272,7 @@ export default function ParetoReportsView() {
                       <ResponsiveContainer width="100%" height="100%">
                          <ComposedChart data={data.invoiceClasses} margin={{ top: 20, right: 20, bottom: 20, left: 20 }}>
                             <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
-                            <XAxis dataKey="range" angle={-90} textAnchor="end" height={160} tick={{fontSize: 12, fontWeight: "bold", dy: 10, fill: "#475569"}} interval={0} axisLine={false} tickLine={false} />
+                            <XAxis dataKey="range" angle={-90} textAnchor="start" height={160} tick={{fontSize: 12, fontWeight: "bold", dy: 10, fill: "#475569"}} interval={0} axisLine={false} tickLine={false} />
                             <YAxis yAxisId="left" tickFormatter={(v) => v.toLocaleString()} />
                             <YAxis yAxisId="right" orientation="right" tickFormatter={(v) => v.toLocaleString()} />
                             <Tooltip formatter={(val: number) => val.toLocaleString()} />
