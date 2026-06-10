@@ -6,9 +6,14 @@ import {
 } from "recharts";
 import { BadgeDollarSign, Filter, Search } from "lucide-react";
 import ExportPrintButtons from "../components/ExportPrintButtons";
+import { defaultXAxisProps, defaultYAxisProps, verticalYAxisProps, hideAxisProps } from "../components/charts/ChartConfig";
 
 export default function ProfitLossReportsView() {
-  const [data, setData] = useState<any[]>([]);
+  
+  const [dayRowsRaw, setDayRowsRaw] = useState<any[]>([]);
+  const [rangeAggRaw, setRangeAggRaw] = useState<any[]>([]);
+  const [hierarchyAggRaw, setHierarchyAggRaw] = useState<any>({l1: [], l2: []});
+
   const [loading, setLoading] = useState(false);
   
   // Filters
@@ -59,7 +64,11 @@ export default function ProfitLossReportsView() {
       const res = await fetch("/api/reports/profit?" + q.toString());
       if (res.ok) {
         const json = await res.json();
-        setData(json.rows || []);
+        
+  setDayRowsRaw(json.dayRows || []);
+  setRangeAggRaw(json.rangeAggregated || []);
+  setHierarchyAggRaw(json.hierarchyAggregated || {l1: [], l2: []});
+
       }
     } catch (error) {
       console.error(error);
@@ -105,56 +114,24 @@ export default function ProfitLossReportsView() {
   };
 
   const dayRows = useMemo(() => {
-     let rows = data.filter(r => r.qty > 0);
+     let rows = dayRowsRaw.filter(r => r.qty > 0);
      if (!sortConfig) {
          rows.sort((a,b) => a.totalProfitLoss - b.totalProfitLoss); // biggest loss first by default
      }
      return applySortAndFilter(rows, r => r.totalProfitLoss > 0, r => r.totalProfitLoss < 0);
-  }, [data, statusFilter, sortConfig]);
+  }, [dayRowsRaw, statusFilter, sortConfig]);
 
   const rangeAggregated = useMemo(() => {
-     const agg: Record<string, any> = {};
-     data.forEach(r => {
-        if (!agg[r.code]) {
-            agg[r.code] = { ...r, qty: 0, totalSales: 0, totalProfitLoss: 0, count: 0 };
-        }
-        agg[r.code].qty += r.qty;
-        agg[r.code].totalSales += r.totalSales;
-        agg[r.code].totalProfitLoss += r.totalProfitLoss;
-        agg[r.code].count += 1;
-     });
-     
-     let arr = Object.values(agg);
+     let arr = [...rangeAggRaw];
      if (!sortConfig) {
          arr.sort((a: any, b: any) => b.totalProfitLoss - a.totalProfitLoss);
      }
      return applySortAndFilter(arr, r => r.totalProfitLoss > 0, r => r.totalProfitLoss < 0);
-  }, [data, statusFilter, sortConfig]);
+  }, [rangeAggRaw, statusFilter, sortConfig]);
 
   const hierarchyAggregated = useMemo(() => {
-      const l1Agg: Record<string, any> = {};
-      const l2Agg: Record<string, any> = {};
-
-      data.forEach(r => {
-          const l1 = r.l1 || 'سایر';
-          const l2 = r.l2 || 'سایر';
-          
-          if (!l1Agg[l1]) l1Agg[l1] = { name: l1, type: 'L1', profit: 0, loss: 0, net: 0, totalSales: 0 };
-          if (!l2Agg[l1+'::'+l2]) l2Agg[l1+'::'+l2] = { name: `${l1} > ${l2}`, type: 'L2', profit: 0, loss: 0, net: 0, totalSales: 0, l1, l2 };
-
-          l1Agg[l1].net += r.totalProfitLoss;
-          l1Agg[l1].totalSales += r.totalSales;
-          if (r.totalProfitLoss > 0) l1Agg[l1].profit += r.totalProfitLoss;
-          if (r.totalProfitLoss < 0) l1Agg[l1].loss += Math.abs(r.totalProfitLoss);
-
-          l2Agg[l1+'::'+l2].net += r.totalProfitLoss;
-          l2Agg[l1+'::'+l2].totalSales += r.totalSales;
-          if (r.totalProfitLoss > 0) l2Agg[l1+'::'+l2].profit += r.totalProfitLoss;
-          if (r.totalProfitLoss < 0) l2Agg[l1+'::'+l2].loss += Math.abs(r.totalProfitLoss);
-      });
-
-      let l1 = Object.values(l1Agg);
-      let l2 = Object.values(l2Agg);
+      let l1 = [...hierarchyAggRaw.l1];
+      let l2 = [...hierarchyAggRaw.l2];
       
       if (!sortConfig) {
           l1.sort((a: any, b: any) => b.net - a.net);
@@ -165,15 +142,15 @@ export default function ProfitLossReportsView() {
           l1: applySortAndFilter(l1, r => r.net > 0, r => r.net < 0), 
           l2: applySortAndFilter(l2, r => r.net > 0, r => r.net < 0) 
       };
-  }, [data, statusFilter, sortConfig]);
+  }, [hierarchyAggRaw, statusFilter, sortConfig]);
 
   const chartData = useMemo(() => {
       const topProfits = [...rangeAggregated].filter(a => a.totalProfitLoss > 0).sort((a,b) => b.totalProfitLoss - a.totalProfitLoss).slice(0, 10);
       const topLosses = [...rangeAggregated].filter(a => a.totalProfitLoss < 0).sort((a,b) => a.totalProfitLoss - b.totalProfitLoss).slice(0, 10);
       
-      const breakevenItems = data.filter(d => d.status === 'breakeven').length;
-      const profitItems = data.filter(d => d.status === 'profit').length;
-      const lossItems = data.filter(d => d.status === 'loss').length;
+      const breakevenItems = dayRowsRaw.filter(d => d.totalProfitLoss === 0).length;
+      const profitItems = dayRowsRaw.filter(d => d.totalProfitLoss > 0).length;
+      const lossItems = dayRowsRaw.filter(d => d.totalProfitLoss < 0).length;
       
       const statusCounts = [
           { name: 'سودآور', value: profitItems, color: '#10b981' },
@@ -182,14 +159,14 @@ export default function ProfitLossReportsView() {
       ];
 
       return { topProfits, topLosses, statusCounts };
-  }, [rangeAggregated, data]);
+  }, [rangeAggregated, dayRowsRaw]);
 
   const sumTotals = {
-      sales: data.reduce((sum, r) => sum + r.totalSales, 0),
-      qty: data.reduce((sum, r) => sum + r.qty, 0),
-      netProfitLoss: data.reduce((sum, r) => sum + r.totalProfitLoss, 0),
-      totalLossOnly: data.reduce((sum, r) => r.totalProfitLoss < 0 ? sum + Math.abs(r.totalProfitLoss) : sum, 0),
-      totalProfitOnly: data.reduce((sum, r) => r.totalProfitLoss > 0 ? sum + r.totalProfitLoss : sum, 0),
+      sales: rangeAggRaw.reduce((sum, r) => sum + r.totalSales, 0),
+      qty: rangeAggRaw.reduce((sum, r) => sum + r.qty, 0),
+      netProfitLoss: rangeAggRaw.reduce((sum, r) => sum + r.totalProfitLoss, 0),
+      totalLossOnly: rangeAggRaw.reduce((sum, r) => r.totalProfitLoss < 0 ? sum + Math.abs(r.totalProfitLoss) : sum, 0),
+      totalProfitOnly: rangeAggRaw.reduce((sum, r) => r.totalProfitLoss > 0 ? sum + r.totalProfitLoss : sum, 0),
   };
 
   const renderKPIs = () => (
@@ -235,7 +212,7 @@ export default function ProfitLossReportsView() {
           <button onClick={fetchData} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700">
               {loading ? "در حال دریافت..." : "اعمال فیلتر"}
           </button>
-          <ExportPrintButtons data={data} fileName="Profit_Loss_Report" />
+          <ExportPrintButtons data={dayRowsRaw} fileName="Profit_Loss_Report" />
         </div>
       </div>
 
@@ -257,7 +234,7 @@ export default function ProfitLossReportsView() {
       {tab === 'day' && (
          <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
             <div className="p-4 border-b border-slate-200 bg-slate-50 flex items-center gap-4">
-                <input type="date" value={exactDate} onChange={e => setExactDate(e.target.value)} className="border border-slate-300 rounded-lg px-3 py-1.5 text-sm" />
+                <input type="text" placeholder="1402/05/12" dir="ltr" value={exactDate} onChange={e => setExactDate(e.target.value)} className="border border-slate-300 rounded-lg px-3 py-1.5 text-sm" />
                 <span className="text-slate-500 text-sm">فیلتر تاریخ مشخص برای مشاهده کالاهایی که با زیان فروخته شده‌اند</span>
             </div>
             <div className="overflow-x-auto max-h-[600px] custom-scrollbar">
@@ -307,11 +284,11 @@ export default function ProfitLossReportsView() {
             <div className="p-4 border-b border-slate-200 bg-slate-50 flex items-center gap-4 flex-wrap">
                 <div className="flex items-center gap-2">
                     <span className="text-sm text-slate-600">از تایخ:</span>
-                    <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="border border-slate-300 rounded-lg px-3 py-1.5 text-sm" />
+                    <input type="text" placeholder="1402/05/12" dir="ltr" value={startDate} onChange={e => setStartDate(e.target.value)} className="border border-slate-300 rounded-lg px-3 py-1.5 text-sm" />
                 </div>
                 <div className="flex items-center gap-2">
                     <span className="text-sm text-slate-600">تا تاریخ:</span>
-                    <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="border border-slate-300 rounded-lg px-3 py-1.5 text-sm" />
+                    <input type="text" placeholder="1402/05/12" dir="ltr" value={endDate} onChange={e => setEndDate(e.target.value)} className="border border-slate-300 rounded-lg px-3 py-1.5 text-sm" />
                 </div>
                 <button onClick={fetchData} className="px-4 py-1.5 hover:bg-slate-200 rounded-lg text-sm bg-white border shadow-sm">به روزرسانی</button>
             </div>
@@ -389,7 +366,7 @@ export default function ProfitLossReportsView() {
 
             <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
                 <div className="p-4 bg-slate-50 border-b font-bold text-slate-700">زیان و سود در سطح زیرگروه (L2)</div>
-                <div className="overflow-x-auto max-h-96 custom-scrollbar">
+                <div className="overflow-x-auto max-h-[500px] custom-scrollbar">
                     <table className="w-full text-sm text-right">
                         <thead className="bg-slate-100/50 text-slate-500 sticky top-0 z-10 shadow-sm">
                             <tr>
@@ -426,55 +403,62 @@ export default function ProfitLossReportsView() {
              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 
                 {/* Top Profitable */}
-                <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 h-96">
+                <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 h-[500px]">
                    <h3 className="text-sm font-bold text-slate-700 mb-4 text-center">پر سودترین کالاها (Top 10)</h3>
-                   <ResponsiveContainer width="100%" height="85%">
-                      <BarChart data={chartData.topProfits} layout="vertical" margin={{top:0, right:30, left:20, bottom:0}}>
+                   <div dir="ltr" className="w-full h-full flex-1 min-h-0 min-w-0">
+<ResponsiveContainer width="100%" height="85%">
+<BarChart data={chartData.topProfits} layout="vertical" margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
                          <CartesianGrid strokeDasharray="3 3" horizontal={false} opacity={0.5} />
-                         <XAxis type="number" hide />
-                         <YAxis dataKey="name" type="category" width={120} tick={{fontSize: 10, fill: "#475569"}} axisLine={false} tickLine={false} />
+                         <XAxis {...hideAxisProps} />
+                         <YAxis dataKey="name" {...verticalYAxisProps} />
                          <RechartsTooltip formatter={(v: number) => formatRial(v) + " ریال"} />
                          <Bar dataKey="totalProfitLoss" fill="#10b981" radius={[0, 4, 4, 0]} name="سود خالص" />
                       </BarChart>
-                   </ResponsiveContainer>
+</ResponsiveContainer>
+</div>
                 </div>
 
                 {/* Top Losses */}
-                <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 h-96">
+                <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 h-[500px]">
                    <h3 className="text-sm font-bold text-slate-700 mb-4 text-center">پر زیان‌ترین کالاها (Top 10)</h3>
-                   <ResponsiveContainer width="100%" height="85%">
-                      <BarChart data={chartData.topLosses} layout="vertical" margin={{top:0, right:30, left:20, bottom:0}}>
+                   <div dir="ltr" className="w-full h-full flex-1 min-h-0 min-w-0">
+<ResponsiveContainer width="100%" height="85%">
+<BarChart data={chartData.topLosses} layout="vertical" margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
                          <CartesianGrid strokeDasharray="3 3" horizontal={false} opacity={0.5} />
-                         <XAxis type="number" hide />
-                         <YAxis dataKey="name" type="category" width={120} tick={{fontSize: 10, fill: "#475569"}} axisLine={false} tickLine={false} />
+                         <XAxis {...hideAxisProps} />
+                         <YAxis dataKey="name" {...verticalYAxisProps} />
                          <RechartsTooltip formatter={(v: number) => formatRial(Math.abs(v)) + " ریال"} />
                          <Bar dataKey="totalProfitLoss" fill="#ef4444" radius={[0, 4, 4, 0]} name="زیان (نمایش منفی)" />
                       </BarChart>
-                   </ResponsiveContainer>
+</ResponsiveContainer>
+</div>
                 </div>
 
                 {/* Hierarchy Comparison L1 - Composed Chart */}
-                <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 h-96 lg:col-span-2">
+                <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 h-[500px] lg:col-span-2">
                    <h3 className="text-sm font-bold text-slate-700 mb-4 text-center">مقایسه سود و زیان گروه‌های اصلی کالا</h3>
-                   <ResponsiveContainer width="100%" height="85%">
-                       <ComposedChart data={hierarchyAggregated.l1} margin={{top: 20, right: 20, left: 20, bottom: 20}}>
+                   <div dir="ltr" className="w-full h-full flex-1 min-h-0 min-w-0">
+<ResponsiveContainer width="100%" height="85%">
+<ComposedChart data={hierarchyAggregated.l1} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
                           <CartesianGrid strokeDasharray="3 3" vertical={false} opacity={0.4} />
-                          <XAxis dataKey="name" angle={-90} textAnchor="start" height={160} tick={{fontSize: 12, fontWeight: "bold", dy: 10, fill: "#475569"}} interval={0} axisLine={false} tickLine={false} />
-                          <YAxis tickFormatter={(v) => (v / 1000000).toFixed(0) + "M"} width={60} />
+                          <XAxis dataKey="name" {...defaultXAxisProps}  />
+                          <YAxis {...defaultYAxisProps} orientation="left" />
                           <RechartsTooltip formatter={(v: number) => formatRial(v) + " ریال"} />
                           <Legend verticalAlign="top" />
                           <Bar dataKey="profit" name="سود" fill="#10b981" radius={[4,4,0,0]} />
                           <Bar dataKey="loss" name="زیان" fill="#ef4444" radius={[4,4,0,0]} />
                           <Line type="monotone" dataKey="net" name="برآیند خالص" stroke="#3b82f6" strokeWidth={3} dot={{r: 4}} />
                        </ComposedChart>
-                   </ResponsiveContainer>
+</ResponsiveContainer>
+</div>
                 </div>
 
                 {/* Status Pie */}
-                <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 h-80">
+                <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 h-[400px]">
                    <h3 className="text-sm font-bold text-slate-700 mb-4 text-center">سهم رکوردهای فروش (تعدادی)</h3>
-                   <ResponsiveContainer width="100%" height="85%">
-                       <PieChart>
+                   <div dir="ltr" className="w-full h-full flex-1 min-h-0 min-w-0">
+<ResponsiveContainer width="100%" height="85%">
+<PieChart>
                           <Pie 
                              data={chartData.statusCounts} 
                              dataKey="value" 
@@ -490,7 +474,8 @@ export default function ProfitLossReportsView() {
                           <RechartsTooltip />
                           <Legend verticalAlign="bottom" height={36}/>
                        </PieChart>
-                   </ResponsiveContainer>
+</ResponsiveContainer>
+</div>
                 </div>
 
              </div>

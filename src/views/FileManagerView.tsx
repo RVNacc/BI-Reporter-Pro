@@ -9,6 +9,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { UploadedFile, MODULES } from "../types";
+import { defaultXAxisProps, defaultYAxisProps, verticalYAxisProps, hideAxisProps } from "../components/charts/ChartConfig";
 
 export default function FileManagerView() {
   const [files, setFiles] = useState<UploadedFile[]>([]);

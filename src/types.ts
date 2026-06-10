@@ -116,9 +116,12 @@ export const MODULES: Record<string, ModuleConfig> = {
       { key: "date", label: "تاریخ", required: true },
       { key: "personnelCode", label: "کد پرسنلی/صندوقدار", required: true },
       { key: "personnelName", label: "نام و نام خانوادگی", required: true },
+      { key: "role", label: "سمت/نقش", required: false },
+      { key: "costCenter", label: "مرکز هزینه/شعبه", required: false },
+      { key: "startDate", label: "تاریخ شروع به کار", required: false },
+      { key: "endDate", label: "تاریخ ترک کار", required: false },
       { key: "entranceTime", label: "ساعت ورود", required: false },
-      { key: "exitTime", label: "ساعت خروج", required: false },
-      { key: "performanceScore", label: "امتیاز عملکرد/راندمان اسکن", required: false }
+      { key: "exitTime", label: "ساعت خروج", required: false }
     ]
   }
 };

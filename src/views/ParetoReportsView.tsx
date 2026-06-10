@@ -3,6 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { ResponsiveContainer, ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts';
 import { Filter, BarChart3, TrendingDown, TrendingUp, Layers } from 'lucide-react';
 import ExportPrintButtons from "../components/ExportPrintButtons";
+import { defaultXAxisProps, defaultYAxisProps, verticalYAxisProps, hideAxisProps } from "../components/charts/ChartConfig";
 
 export default function ParetoReportsView() {
   const [period, setPeriod] = useState<string>('');
@@ -46,22 +47,25 @@ export default function ParetoReportsView() {
   const renderParetoChart = (chartData: any[], valueKey: string, nameKey: string, title: string) => {
      if (!chartData || chartData.length === 0) return null;
      const topN = chartData.slice(0, 30); // show top 30 in chart
-     return (
-        <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
+     if (data?.error) return <div className="p-10 text-center text-red-500">{data.error}</div>;
+  return (
+    <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
            <h3 className="text-lg font-semibold text-slate-800 mb-4">{title}</h3>
-           <div className="h-[400px]">
-              <ResponsiveContainer width="100%" height="100%">
-                 <ComposedChart data={topN} margin={{ top: 20, right: 20, bottom: 20, left: 20 }}>
+           <div className="h-[550px]">
+              <div dir="ltr" className="w-full h-full flex-1 min-h-0 min-w-0">
+<ResponsiveContainer width="100%" height="100%">
+<ComposedChart data={topN} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
                     <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
                     <XAxis dataKey={nameKey} angle={-90} textAnchor="start" height={180} tickFormatter={(v) => v && v.length > 30 ? v.substring(0, 30) + '...' : v} tick={{fontSize: 12, fontWeight: 'bold', dy: 10, fill: '#1e293b'}} interval={0} />
-                    <YAxis yAxisId="left" tickFormatter={(v) => (v).toLocaleString()} />
-                    <YAxis yAxisId="right" orientation="right" tickFormatter={(v) => v + '%'} />
+                    <YAxis yAxisId="left" {...defaultYAxisProps} orientation="left" />
+                    <YAxis yAxisId="right" {...defaultYAxisProps} />
                     <Tooltip formatter={(val: number, name: string) => [name === 'درصد تجمعی' ? val.toFixed(2) + '%' : val.toLocaleString(), name]} />
                     <Legend />
                     <Bar yAxisId="left" dataKey={valueKey} name="مقدار/مبلغ" fill="#3b82f6" radius={[4,4,0,0]} />
                     <Line yAxisId="right" type="monotone" dataKey="cumPercent" name="درصد تجمعی" stroke="#ef4444" strokeWidth={3} dot={false} />
                  </ComposedChart>
-              </ResponsiveContainer>
+</ResponsiveContainer>
+</div>
            </div>
         </div>
      )
@@ -180,7 +184,7 @@ export default function ParetoReportsView() {
                    <Layers size={18} className="text-blue-600" />
                    <h3 className="font-semibold text-slate-800">تحلیل گروه‌های اصلی (سطح ۱)</h3>
                 </div>
-                <div className="overflow-x-auto max-h-[400px]">
+                <div className="overflow-x-auto max-h-[550px]">
                    <table className="w-full text-sm text-right">
                       <thead className="bg-slate-50 sticky top-0 shadow-sm text-slate-600">
                          <tr>
@@ -224,7 +228,7 @@ export default function ParetoReportsView() {
                    <Layers size={18} className="text-indigo-600" />
                    <h3 className="font-semibold text-slate-800">تحلیل گروه‌های فرعی (سطح ۲)</h3>
                 </div>
-                <div className="overflow-x-auto max-h-[400px]">
+                <div className="overflow-x-auto max-h-[550px]">
                    <table className="w-full text-sm text-right">
                       <thead className="bg-slate-50 sticky top-0 shadow-sm text-slate-600">
                          <tr>
@@ -268,19 +272,21 @@ export default function ParetoReportsView() {
              <h3 className="font-semibold text-slate-800 mb-4 text-lg border-b pb-2">پراکندگی مبلغی فاکتورها</h3>
              {data?.invoiceClasses && data.invoiceClasses.length > 0 ? (
                  <>
-                   <div className="h-[300px] mb-8">
-                      <ResponsiveContainer width="100%" height="100%">
-                         <ComposedChart data={data.invoiceClasses} margin={{ top: 20, right: 20, bottom: 20, left: 20 }}>
+                   <div className="h-[450px] mb-8">
+                      <div dir="ltr" className="w-full h-full flex-1 min-h-0 min-w-0">
+<ResponsiveContainer width="100%" height="100%">
+<ComposedChart data={data.invoiceClasses} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
                             <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
-                            <XAxis dataKey="range" angle={-90} textAnchor="start" height={160} tick={{fontSize: 12, fontWeight: "bold", dy: 10, fill: "#475569"}} interval={0} axisLine={false} tickLine={false} />
-                            <YAxis yAxisId="left" tickFormatter={(v) => v.toLocaleString()} />
-                            <YAxis yAxisId="right" orientation="right" tickFormatter={(v) => v.toLocaleString()} />
+                            <XAxis dataKey="range" {...defaultXAxisProps}  />
+                            <YAxis yAxisId="left" {...defaultYAxisProps} orientation="left" />
+                            <YAxis yAxisId="right" {...defaultYAxisProps} />
                             <Tooltip formatter={(val: number) => val.toLocaleString()} />
                             <Legend />
                             <Bar yAxisId="left" dataKey="count" name="تعداد فاکتور" fill="#8b5cf6" radius={[4,4,0,0]} />
                             <Line yAxisId="right" type="monotone" dataKey="totalAmt" name="مبلغ کل طبقه" stroke="#f59e0b" strokeWidth={3} dot={false} />
                          </ComposedChart>
-                      </ResponsiveContainer>
+</ResponsiveContainer>
+</div>
                    </div>
                    
                    <div className="overflow-x-auto border border-slate-200 rounded-lg">

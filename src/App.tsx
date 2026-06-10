@@ -15,6 +15,7 @@ import CostAllocationView from './views/CostAllocationView';
 import ParetoReportsView from './views/ParetoReportsView';
 import { WeeklyReportsView } from './views/WeeklyReportsView';
 import ProfitLossReportsView from './views/ProfitLossReportsView';
+import AdvancedManagementView from './views/AdvancedManagementView';
 
 export default function App() {
   const [currentView, setCurrentView] = useState('dashboard');
@@ -41,6 +42,8 @@ export default function App() {
         return <WeeklyReportsView />;
       case 'profit':
         return <ProfitLossReportsView />;
+      case 'advanced':
+        return <AdvancedManagementView />;
       default:
         return <DashboardView />;
     }

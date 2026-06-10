@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 
 import ExportPrintButtons from "../components/ExportPrintButtons";
+import { defaultXAxisProps, defaultYAxisProps, verticalYAxisProps, hideAxisProps } from "../components/charts/ChartConfig";
 
 export default function CostAllocationView() {
   const [costCenters, setCostCenters] = useState<any[]>([]);
@@ -193,6 +194,15 @@ export default function CostAllocationView() {
             <option value="sales_price">نرخ فروش</option>
             <option value="purchase_price">نرخ خرید</option>
             <option value="time_spent">زمان / ساعت</option>
+            <option value="sales_and_purchase_qty">جمع تعداد واحدهای خرید و فروش</option>
+            <option value="sales_and_purchase_value">جمع مبلغی خرید و فروش</option>
+            <option value="sales_and_purchase_hours">جمع ساعت های فاکتور های خرید و فروش</option>
+            <option value="sales_and_purchase_invoice_count">جمع تعداد فاکتور های خرید و فروش</option>
+            <option value="sales_and_purchase_price">جمع نرخ های خرید و فروش</option>
+            <option value="sales_and_purchase_and_returns_price">جمع نرخ های خرید، فروش و برگشتی‌ها</option>
+            <option value="sales_and_purchase_and_returns_invoice_count">جمع تعداد فاکتور های خرید، فروش و برگشتی‌ها</option>
+            <option value="sales_and_purchase_and_returns_qty">جمع تعداد واحد های خرید، فروش و برگشتی‌ها</option>
+            <option value="sales_and_purchase_and_returns_hours">جمع ساعات خرید، فروش و برگشتی‌ها</option>
           </select>
           <div className="relative flex-1 min-w-[250px]">
             <div
@@ -454,6 +464,15 @@ export default function CostAllocationView() {
                           <option value="sales_price">نرخ فروش</option>
                           <option value="purchase_price">نرخ خرید</option>
                           <option value="time_spent">زمان / ساعت</option>
+                          <option value="sales_and_purchase_qty">جمع تعداد واحدهای خرید و فروش</option>
+                          <option value="sales_and_purchase_value">جمع مبلغی خرید و فروش</option>
+                          <option value="sales_and_purchase_hours">جمع ساعت های فاکتور های خرید و فروش</option>
+                          <option value="sales_and_purchase_invoice_count">جمع تعداد فاکتور های خرید و فروش</option>
+                          <option value="sales_and_purchase_price">جمع نرخ های خرید و فروش</option>
+                          <option value="sales_and_purchase_and_returns_price">جمع نرخ های خرید، فروش و برگشتی‌ها</option>
+                          <option value="sales_and_purchase_and_returns_invoice_count">جمع تعداد فاکتور های خرید، فروش و برگشتی‌ها</option>
+                          <option value="sales_and_purchase_and_returns_qty">جمع تعداد واحد های خرید، فروش و برگشتی‌ها</option>
+                          <option value="sales_and_purchase_and_returns_hours">جمع ساعات خرید، فروش و برگشتی‌ها</option>
                         </select>
                       </td>
                       <td className="p-3">

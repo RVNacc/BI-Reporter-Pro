@@ -25,6 +25,7 @@ export default function Sidebar({ currentView, setCurrentView }: SidebarProps) {
     { id: "pareto", label: "گزارشات پارتو", icon: <BarChart3 size={20} /> },
     { id: "weekly", label: "روند فروش هفتگی", icon: <TrendingUp size={20} /> },
     { id: "profit", label: "تحلیل سود و زیان سطوح", icon: <BadgeDollarSign size={20} /> },
+    { id: "advanced", label: "هوش تجاری و گزارشات BI", icon: <BarChart3 size={20} /> },
     { id: "hr", label: "منابع انسانی", icon: <Users size={20} /> },
   ];
 

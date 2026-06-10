@@ -22,6 +22,7 @@ import {
 
 import HelpModal from "../components/HelpModal";
 import ExportPrintButtons from "../components/ExportPrintButtons";
+import { defaultXAxisProps, defaultYAxisProps, verticalYAxisProps, hideAxisProps } from "../components/charts/ChartConfig";
 
 export default function FinanceReportsView() {
   const [activeTab, setActiveTab] = useState("treasury");
@@ -65,6 +66,7 @@ export default function FinanceReportsView() {
     },
   ];
 
+  if (data?.error) return <div className="p-10 text-center text-red-500">{data.error}</div>;
   return (
     <div className="p-6 md:p-8 h-full flex flex-col overflow-auto print:overflow-visible print:h-auto">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-end mb-6 gap-4 shrink-0">

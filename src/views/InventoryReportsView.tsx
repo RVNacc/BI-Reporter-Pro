@@ -32,6 +32,7 @@ import {
 
 import HelpModal from "../components/HelpModal";
 import ExportPrintButtons from "../components/ExportPrintButtons";
+import { defaultXAxisProps, defaultYAxisProps, verticalYAxisProps, hideAxisProps } from "../components/charts/ChartConfig";
 
 export default function InventoryReportsView() {
   const [data, setData] = useState<any>(null);
@@ -67,6 +68,14 @@ export default function InventoryReportsView() {
   const formatQty = (v: number) => Number(v || 0).toLocaleString();
 
   const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899', '#f97316'];
+
+  if (data?.error) {
+    return (
+      <div className="p-10 text-center text-red-500 font-bold bg-white m-6 rounded-lg shadow-sm border border-red-100">
+        {data.error}
+      </div>
+    );
+  }
 
   return (
     <div className="p-6 md:p-8 h-full flex flex-col overflow-auto print:overflow-visible print:h-auto">
@@ -116,26 +125,26 @@ export default function InventoryReportsView() {
                </h3>
                
                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-                  <div className="h-64 border rounded-xl p-4 bg-slate-50">
+                  <div className="h-64 border rounded-xl p-4 bg-slate-50 flex flex-col">
                      <h4 className="text-center font-bold text-sm text-slate-600 mb-2">مبالغ برگشتی گروه اصلی (BarChart)</h4>
                      <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={data.retL1?.slice(0,5)} margin={{top:10, left:20, right:20, bottom:0}}>
+                        <BarChart data={data.retL1?.slice(0,5)} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
                            <CartesianGrid strokeDasharray="3 3" vertical={false} />
                            <XAxis dataKey="name" angle={-90} textAnchor="start" height={160} tickFormatter={(v) => v && String(v).length > 25 ? String(v).substring(0, 25) + "..." : v} tick={{fontSize: 12, fontWeight: "bold", dy: 10, fill: "#475569"}} interval={0} axisLine={false} tickLine={false} />
-                           <YAxis hide />
+                           <YAxis {...defaultYAxisProps} />
                            <RechartsTooltip formatter={(v:number)=>formatRial(v)}/>
                            <Bar dataKey="amt" name="ارزش ریالی مرجوعی" fill="#ef4444" radius={[4,4,0,0]} />
                         </BarChart>
                      </ResponsiveContainer>
                   </div>
                   
-                  <div className="h-64 border rounded-xl p-4 bg-slate-50">
+                  <div className="h-64 border rounded-xl p-4 bg-slate-50 flex flex-col">
                      <h4 className="text-center font-bold text-sm text-slate-600 mb-2">تعداد برگشتی زیرگروه‌ها (L2)</h4>
                      <ResponsiveContainer width="100%" height="100%">
-                        <LineChart data={data.retL2?.slice(0,5)} margin={{top:10, left:20, right:20, bottom:0}}>
+                        <LineChart data={data.retL2?.slice(0,5)} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
                            <CartesianGrid strokeDasharray="3 3" vertical={false} />
                            <XAxis dataKey="name" angle={-90} textAnchor="start" height={160} tickFormatter={(v) => v && String(v).length > 25 ? String(v).substring(0, 25) + "..." : v} tick={{fontSize: 12, fontWeight: "bold", dy: 10, fill: "#475569"}} interval={0} axisLine={false} tickLine={false} />
-                           <YAxis hide />
+                           <YAxis {...defaultYAxisProps} />
                            <RechartsTooltip formatter={(v:number)=>formatQty(v)}/>
                            <Line type="monotone" dataKey="qty" stroke="#f59e0b" strokeWidth={3} dot={{r:4}} name="تعداد مرجوعی" />
                         </LineChart>

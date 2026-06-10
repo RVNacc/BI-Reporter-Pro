@@ -32,6 +32,7 @@ import {
 
 import HelpModal from "../components/HelpModal";
 import ExportPrintButtons from "../components/ExportPrintButtons";
+import { defaultXAxisProps, defaultYAxisProps, verticalYAxisProps, hideAxisProps } from "../components/charts/ChartConfig";
 
 export default function SalesReportsView() {
   const [data, setData] = useState<any>(null);
@@ -67,6 +68,28 @@ export default function SalesReportsView() {
   const formatQty = (v: number) => Number(v || 0).toLocaleString();
 
   const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899', '#f97316'];
+
+  const isEmptyData = data && 
+    (!data.basketL1 || data.basketL1.length === 0);
+
+  if (isEmptyData) {
+    return (
+      <div className="p-6 h-full flex flex-col space-y-6">
+        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col md:flex-row justify-between md:items-center gap-4">
+          <AdvancedPeriodFilter
+            value={period}
+            onChange={setPeriod}
+            availableYears={periods.map((p:any) => p.value.startsWith('Y:') ? p.value.substring(2) : null).filter(Boolean) as string[]}
+          />
+        </div>
+        <div className="flex flex-col items-center justify-center min-h-[400px] border border-slate-200 rounded-xl bg-white shadow-sm p-10">
+          <ShoppingCart size={64} className="text-slate-200 mb-6" />
+          <p className="text-lg text-slate-500 font-bold mb-2">داده‌ای یافت نشد.</p>
+          <p className="text-slate-400 font-medium">هیچ فایل فروش یا مرجوعی بارگذاری نشده است.</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="p-6 md:p-8 h-full flex flex-col overflow-auto print:overflow-visible print:h-auto">
@@ -122,21 +145,24 @@ export default function SalesReportsView() {
                </h3>
                
                <div className="grid grid-cols-1 xl:grid-cols-2 gap-8 mb-8">
-                  <div className="h-72 border rounded-xl p-4 bg-slate-50">
+                  <div className="h-[450px] border rounded-xl p-4 bg-slate-50 flex flex-col">
                      <h4 className="text-center font-bold text-sm text-slate-600 mb-2">روند ریالی گروه‌ها (Line)</h4>
-                     <ResponsiveContainer width="100%" height="100%">
-                        <LineChart data={data.basketL1} margin={{top:10, left:20, right:20, bottom:0}}>
+                     <div dir="ltr" className="w-full h-full flex-1 min-h-0 min-w-0">
+<ResponsiveContainer width="100%" height="100%">
+<LineChart data={data.basketL1} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
                            <CartesianGrid strokeDasharray="3 3" vertical={false} />
                            <XAxis dataKey="name" angle={-90} textAnchor="start" height={160} tickFormatter={(v) => v && String(v).length > 25 ? String(v).substring(0, 25) + "..." : v} tick={{fontSize: 12, fontWeight: "bold", dy: 10, fill: "#475569"}} interval={0} axisLine={false} tickLine={false} />
-                           <YAxis hide />
+                           <YAxis {...defaultYAxisProps} />
                            <RechartsTooltip formatter={(v:number)=>formatRial(v)}/>
                            <Line type="monotone" dataKey="netAmt" stroke="#3b82f6" strokeWidth={3} dot={{r:4}} />
                         </LineChart>
-                     </ResponsiveContainer>
+</ResponsiveContainer>
+</div>
                   </div>
-                  <div className="h-72 border rounded-xl p-4 bg-slate-50 relative">
+                  <div className="h-[450px] border rounded-xl p-4 bg-slate-50 relative flex flex-col">
                      <h4 className="text-center font-bold text-sm text-slate-600 mb-2 mt-2">سهم تعدادی هر گروه (Pie)</h4>
-                     <ResponsiveContainer width="100%" height="80%">
+                     <div dir="ltr" className="w-full flex-1 min-h-0 min-w-0 flex items-center justify-center">
+<ResponsiveContainer width="100%" height="100%">
                         <PieChart>
                            <Pie 
                              data={data.basketL1} 
@@ -152,6 +178,7 @@ export default function SalesReportsView() {
                            <Legend verticalAlign="bottom" height={36}/>
                         </PieChart>
                      </ResponsiveContainer>
+                     </div>
                   </div>
                </div>
 
@@ -187,30 +214,34 @@ export default function SalesReportsView() {
                </h3>
 
                <div className="grid grid-cols-1 xl:grid-cols-2 gap-8 mb-8">
-                  <div className="h-72 border rounded-xl p-4 bg-slate-50">
+                  <div className="h-[450px] border rounded-xl p-4 bg-slate-50 flex flex-col">
                      <h4 className="text-center font-bold text-sm text-slate-600 mb-2">مقایسه فروش ریالی زیرگروه‌ها (Bar)</h4>
-                     <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={data.basketL2.slice(0,10)} margin={{top:10, left:20, right:20, bottom:0}}>
+                     <div dir="ltr" className="w-full h-full flex-1 min-h-0 min-w-0">
+<ResponsiveContainer width="100%" height="100%">
+<BarChart data={data.basketL2.slice(0,10)} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
                            <CartesianGrid strokeDasharray="3 3" vertical={false} />
                            <XAxis dataKey="name" angle={-90} textAnchor="start" height={160} tickFormatter={(v) => v && String(v).length > 25 ? String(v).substring(0, 25) + "..." : v} tick={{fontSize: 12, fontWeight: "bold", dy: 10, fill: "#475569"}} interval={0} axisLine={false} tickLine={false} />
-                           <YAxis hide />
+                           <YAxis {...defaultYAxisProps} />
                            <RechartsTooltip formatter={(v:number)=>formatRial(v)}/>
                            <Bar dataKey="netAmt" fill="#10b981" radius={[4,4,0,0]} />
                         </BarChart>
-                     </ResponsiveContainer>
+</ResponsiveContainer>
+</div>
                   </div>
                   
-                  <div className="h-72 border rounded-xl p-4 bg-slate-50">
+                  <div className="h-[450px] border rounded-xl p-4 bg-slate-50 flex flex-col">
                      <h4 className="text-center font-bold text-sm text-slate-600 mb-2">روند تعداد فروش زیرگروه‌ها (Line)</h4>
-                     <ResponsiveContainer width="100%" height="100%">
-                        <LineChart data={data.basketL2.slice(0,10)} margin={{top:10, left:20, right:20, bottom:0}}>
+                     <div dir="ltr" className="w-full h-full flex-1 min-h-0 min-w-0">
+<ResponsiveContainer width="100%" height="100%">
+<LineChart data={data.basketL2.slice(0,10)} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
                            <CartesianGrid strokeDasharray="3 3" vertical={false} />
                            <XAxis dataKey="name" angle={-90} textAnchor="start" height={160} tickFormatter={(v) => v && String(v).length > 25 ? String(v).substring(0, 25) + "..." : v} tick={{fontSize: 12, fontWeight: "bold", dy: 10, fill: "#475569"}} interval={0} axisLine={false} tickLine={false} />
-                           <YAxis hide />
+                           <YAxis {...defaultYAxisProps} />
                            <RechartsTooltip formatter={(v:number)=>formatQty(v)}/>
                            <Line type="monotone" dataKey="netQty" stroke="#f59e0b" strokeWidth={3} dot={{r:4}} />
                         </LineChart>
-                     </ResponsiveContainer>
+</ResponsiveContainer>
+</div>
                   </div>
                </div>
 
@@ -248,19 +279,21 @@ export default function SalesReportsView() {
               حاشیه سود حاصل از فروش کالاها
             </h3>
 
-            <div className="h-80 border rounded-xl p-4 bg-slate-50 mb-4">
+            <div className="h-[500px] border rounded-xl p-4 bg-slate-50 mb-4 flex flex-col">
               <h4 className="text-center font-bold text-sm text-slate-600 mb-2">مقایسه فروش و سود ناخالص گروه‌ها</h4>
-              <ResponsiveContainer width="100%" height="100%">
-                 <BarChart data={data.profitL1} margin={{top:10, left:20, right:20, bottom:0}}>
+              <div dir="ltr" className="w-full h-full flex-1 min-h-0 min-w-0">
+<ResponsiveContainer width="100%" height="100%">
+<BarChart data={data.profitL1} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
                     <CartesianGrid strokeDasharray="3 3" vertical={false} />
                     <XAxis dataKey="name" angle={-90} textAnchor="start" height={160} tickFormatter={(v) => v && String(v).length > 25 ? String(v).substring(0, 25) + "..." : v} tick={{fontSize: 12, fontWeight: "bold", dy: 10, fill: "#475569"}} interval={0} axisLine={false} tickLine={false} />
-                    <YAxis hide />
+                    <YAxis {...defaultYAxisProps} />
                     <RechartsTooltip formatter={(v:number)=>formatRial(v)}/>
                     <Legend />
                     <Bar dataKey="netAmt" name="فروش خالص" fill="#3b82f6" radius={[4,4,0,0]} />
                     <Bar dataKey="profit" name="سود ناخالص" fill="#10b981" radius={[4,4,0,0]} />
                  </BarChart>
-              </ResponsiveContainer>
+</ResponsiveContainer>
+</div>
             </div>
 
             <div className="overflow-x-auto border rounded-xl">
@@ -304,29 +337,33 @@ export default function SalesReportsView() {
                </h3>
                
                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-                  <div className="h-64 border rounded-xl p-4 bg-slate-50">
+                  <div className="h-[400px] border rounded-xl p-4 bg-slate-50 flex flex-col">
                      <h4 className="text-center font-bold text-sm text-slate-600 mb-2">مبلغ برگشتی گروه اصلی (Bar)</h4>
-                     <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={data.topReturnedCatL1} margin={{top:10, left:20, right:20, bottom:0}}>
+                     <div dir="ltr" className="w-full h-full flex-1 min-h-0 min-w-0">
+<ResponsiveContainer width="100%" height="100%">
+<BarChart data={data.topReturnedCatL1} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
                            <CartesianGrid strokeDasharray="3 3" vertical={false} />
                            <XAxis dataKey="name" angle={-90} textAnchor="start" height={160} tickFormatter={(v) => v && String(v).length > 25 ? String(v).substring(0, 25) + "..." : v} tick={{fontSize: 12, fontWeight: "bold", dy: 10, fill: "#475569"}} interval={0} axisLine={false} tickLine={false} />
-                           <YAxis hide />
+                           <YAxis {...defaultYAxisProps} />
                            <RechartsTooltip formatter={(v:number)=>formatRial(v)}/>
                            <Bar dataKey="returnAmt" name="مبلغ برگشتی" fill="#ef4444" radius={[4,4,0,0]} />
                         </BarChart>
-                     </ResponsiveContainer>
+</ResponsiveContainer>
+</div>
                   </div>
-                  <div className="h-64 border rounded-xl p-4 bg-slate-50">
+                  <div className="h-[400px] border rounded-xl p-4 bg-slate-50 flex flex-col">
                      <h4 className="text-center font-bold text-sm text-slate-600 mb-2">مبلغ برگشتی زیرگروه (Bar)</h4>
-                     <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={data.topReturnedCatL2} layout="vertical" margin={{top:10, left:20, right:20, bottom:0}}>
+                     <div dir="ltr" className="w-full h-full flex-1 min-h-0 min-w-0">
+<ResponsiveContainer width="100%" height="100%">
+<BarChart data={data.topReturnedCatL2} layout="vertical" margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
                            <CartesianGrid strokeDasharray="3 3" horizontal={false} />
-                           <XAxis type="number" hide />
-                           <YAxis type="category" dataKey="name" width={100} tick={{fontSize:11}} />
+                           <XAxis {...hideAxisProps} />
+                           <YAxis dataKey="name" {...verticalYAxisProps} />
                            <RechartsTooltip formatter={(v:number)=>formatRial(v)}/>
                            <Bar dataKey="returnAmt" name="مبلغ برگشتی" fill="#f97316" radius={[0,4,4,0]} />
                         </BarChart>
-                     </ResponsiveContainer>
+</ResponsiveContainer>
+</div>
                   </div>
                </div>
 
@@ -371,16 +408,15 @@ export default function SalesReportsView() {
             </h3>
             {data.trafficArr && data.trafficArr.length > 0 ? (
               <div className="flex-1 w-full" dir="ltr">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart
+                <div dir="ltr" className="w-full h-full flex-1 min-h-0 min-w-0">
+<ResponsiveContainer width="100%" height="100%">
+<BarChart
                     data={data.trafficArr}
-                    margin={{ top: 10, right: 10, bottom: 20, left: -20 }}
+                    margin={{ top: 20, right: 30, left: 20, bottom: 20 }}
                   >
                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
-                    <XAxis dataKey="hour" tick={{ fill: "#64748b" }} axisLine={false} tickLine={false}
-                      label={{ value: "ساعت (HH)", position: "insideBottom", offset: -10, fill: "#64748b" }}
-                    />
-                    <YAxis tick={{ fill: "#64748b" }} axisLine={false} tickLine={false} />
+                    <XAxis dataKey="hour" {...defaultXAxisProps}  />
+                    <YAxis {...defaultYAxisProps} />
                     <RechartsTooltip formatter={(val: number) => val + " تراکنش"} labelFormatter={(val) => "ساعت " + val} />
                     <Bar dataKey="count" radius={[4, 4, 0, 0]} name="تعداد">
                       {data.trafficArr.map((entry: any, index: number) => (
@@ -388,7 +424,8 @@ export default function SalesReportsView() {
                       ))}
                     </Bar>
                   </BarChart>
-                </ResponsiveContainer>
+</ResponsiveContainer>
+</div>
               </div>
             ) : (
               <div className="flex-1 flex items-center justify-center text-slate-400">

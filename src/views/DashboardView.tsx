@@ -22,6 +22,7 @@ import {
 } from "recharts";
 import HelpModal from "../components/HelpModal";
 import ExportPrintButtons from "../components/ExportPrintButtons";
+import { defaultXAxisProps, defaultYAxisProps, verticalYAxisProps, hideAxisProps } from "../components/charts/ChartConfig";
 
 export default function DashboardView() {
   const [data, setData] = useState<any>(null);
@@ -57,6 +58,22 @@ export default function DashboardView() {
         در حال دریافت داده‌ها...
       </div>
     );
+    
+  if (data.error) {
+    return (
+      <div className="p-10 text-center text-red-500">
+        {data.error}
+      </div>
+    );
+  }
+  
+  if (!data.kpis) {
+      return (
+          <div className="p-10 text-center text-slate-500">
+            داده‌ای برای نمایش یافت نشد. لطفاً اطلاعات را در قسمت مدیریت فایل آپلود کنید.
+          </div>
+      );
+  }
 
   return (
     <div className="p-8">
@@ -139,11 +156,11 @@ export default function DashboardView() {
           <h3 className="font-semibold text-slate-700 mb-6">
             روند فروش - مقایسه‌ای دوره‌ای (ریال)
           </h3>
-          <div className="h-80 w-full" dir="ltr">
+          <div className="h-[500px] w-full" dir="ltr">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart
                 data={data.salesTrend}
-                margin={{ top: 5, right: 20, bottom: 5, left: 0 }}
+                margin={{ top: 20, right: 30, left: 20, bottom: 20 }}
               >
                 <CartesianGrid
                   strokeDasharray="3 3"
@@ -156,12 +173,7 @@ export default function DashboardView() {
                   axisLine={false}
                   tickLine={false}
                 />
-                <YAxis
-                  tick={{ fill: "#64748b" }}
-                  axisLine={false}
-                  tickLine={false}
-                  tickFormatter={(val) => `${(val / 1000000).toFixed(0)}M`}
-                />
+                <YAxis {...defaultYAxisProps} />
                 <RechartsTooltip
                   contentStyle={{
                     borderRadius: "8px",
@@ -194,27 +206,20 @@ export default function DashboardView() {
           <h3 className="font-semibold text-slate-700 mb-6">
             پارتو ریالی گروه‌های کالایی اصلی
           </h3>
-          <div className="h-80 w-full" dir="ltr">
+          <div className="h-[500px] w-full" dir="ltr">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart
                 data={data.paretoData}
                 layout="vertical"
-                margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
+                margin={{ top: 20, right: 30, left: 20, bottom: 20 }}
               >
                 <CartesianGrid
                   strokeDasharray="3 3"
                   horizontal={false}
                   stroke="#e2e8f0"
                 />
-                <XAxis type="number" hide />
-                <YAxis
-                  dataKey="name"
-                  type="category"
-                  axisLine={false}
-                  tickLine={false}
-                  tick={{ fill: "#475569", fontSize: 13 }}
-                  width={90}
-                />
+                <XAxis {...hideAxisProps} />
+                <YAxis dataKey="name" {...verticalYAxisProps} />
                 <RechartsTooltip
                   cursor={{ fill: "#f1f5f9" }}
                   contentStyle={{ textAlign: "right" }}

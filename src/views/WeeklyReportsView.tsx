@@ -1,8 +1,8 @@
 import AdvancedPeriodFilter from "../components/AdvancedPeriodFilter";
 import React, { useState, useEffect } from "react";
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, ResponsiveContainer, Tooltip as RechartsTooltip, Legend } from "recharts";
-
-import ExportPrintButtons from "../components/ExportPrintButtons";
+import { Download } from "lucide-react";
+import { defaultXAxisProps, defaultYAxisProps, verticalYAxisProps, hideAxisProps } from "../components/charts/ChartConfig";
 
 const formatRial = (v: number) => Number(v || 0).toLocaleString() + " ریال";
 const formatQty = (v: number) => Number(v || 0).toLocaleString();
@@ -41,8 +41,30 @@ export function WeeklyReportsView() {
     }
   }, [period]);
 
-  const handlePrint = () => {
-     window.print();
+  const handleExportCSV = () => {
+     if (!data || !data.rows || !data.weeks) return;
+     let csv = "سطح ۱,سطح ۲,مرکز فعالیت";
+     const weeksContent = data.weeks.map((w: number) => `هفته ${w} - رشد,هفته ${w} - ${mode === "amt" ? "ریال" : "تعداد"}`).join(",");
+     csv += "," + weeksContent + "\n";
+
+     rows.forEach((row: any) => {
+         let line = `"${row.l1}","${row.l2}","${row.ac}"`;
+         data.weeks.forEach((w: number) => {
+             const g = mode === "amt" ? row.wAmt[`g${w}`] : row.wQty[`g${w}`];
+             const val = mode === "amt" ? row.wAmt[`w${w}`] : row.wQty[`w${w}`];
+             const gVal = w > 1 ? (g * 100).toFixed(0) + '%' : '-';
+             line += `,"${gVal}","${val || 0}"`;
+         });
+         csv += line + "\n";
+     });
+
+     const encodeUri = encodeURI("data:text/csv;charset=utf-8," + csv);
+     const link = document.createElement("a");
+     link.setAttribute("href", encodeUri);
+     link.setAttribute("download", `گزارش_روند_هفتگی_${period || 'کل'}.csv`);
+     document.body.appendChild(link);
+     link.click();
+     document.body.removeChild(link);
   };
 
   if (!data) return <div className="p-6 text-slate-500">در حال بارگذاری...</div>;
@@ -82,34 +104,44 @@ export function WeeklyReportsView() {
              <button onClick={() => setMode("amt")} className={`px-4 py-1.5 text-sm rounded ${mode === "amt" ? "bg-white shadow text-blue-600 font-medium" : "text-slate-600 hover:text-slate-800"}`}>ریالی</button>
              <button onClick={() => setMode("qty")} className={`px-4 py-1.5 text-sm rounded ${mode === "qty" ? "bg-white shadow text-blue-600 font-medium" : "text-slate-600 hover:text-slate-800"}`}>تعدادی</button>
           </div>
-          <ExportPrintButtons moduleName="sales" period={period} fileName="Weekly_Report" />
+          <button 
+             onClick={handleExportCSV}
+             className="flex items-center gap-2 px-4 py-2 bg-emerald-50 text-emerald-600 hover:bg-emerald-100 rounded-lg text-sm font-medium border border-emerald-200 transition-colors"
+          >
+             <Download size={16} />
+             <span>خروجی اکسل</span>
+          </button>
         </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 print:hidden">
-          <div className="h-80 border border-slate-200 rounded-xl p-4 bg-white shadow-sm">
-             <h4 className="text-center font-bold text-sm text-slate-600 mb-2">روند کل {mode === 'amt' ? 'ریالی' : 'تعدادی'} (لاین)</h4>
-             <ResponsiveContainer width="100%" height="100%">
-                 <LineChart data={chartData} margin={{top:10, left:20, right:20, bottom:0}}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                    <XAxis dataKey="weekName" angle={-90} textAnchor="start" height={100} tick={{fontSize: 12, fontWeight: "bold", dy: 10, fill: "#475569"}} interval={0} axisLine={false} tickLine={false} />
-                    <YAxis hide />
-                    <RechartsTooltip formatter={(v:number)=> mode === 'amt' ? formatRial(v) : formatQty(v)}/>
-                    <Line type="monotone" dataKey={mode === 'amt' ? 'netAmt' : 'netQty'} stroke="#3b82f6" strokeWidth={3} dot={{r: 4}} />
-                 </LineChart>
-             </ResponsiveContainer>
+          <div className="h-[450px] border border-slate-200 rounded-xl p-4 bg-white shadow-sm flex flex-col">
+             <h4 className="text-center font-bold text-sm text-slate-600 mb-2 shrink-0">روند کل {mode === 'amt' ? 'ریالی' : 'تعدادی'} (لاین)</h4>
+             <div dir="ltr" className="w-full h-full flex-1 min-h-0 min-w-0">
+                 <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={chartData} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                        <XAxis dataKey="weekName" {...defaultXAxisProps}  />
+                        <YAxis {...defaultYAxisProps} />
+                        <RechartsTooltip formatter={(v:number)=> mode === 'amt' ? formatRial(v) : formatQty(v)}/>
+                        <Line type="monotone" dataKey={mode === 'amt' ? 'netAmt' : 'netQty'} stroke="#3b82f6" strokeWidth={3} dot={{r: 4}} />
+                    </LineChart>
+                 </ResponsiveContainer>
+             </div>
           </div>
-          <div className="h-80 border border-slate-200 rounded-xl p-4 bg-white shadow-sm">
-             <h4 className="text-center font-bold text-sm text-slate-600 mb-2">مجموع {mode === 'amt' ? 'ریالی' : 'تعدادی'} کل (ستون)</h4>
-             <ResponsiveContainer width="100%" height="100%">
-                 <BarChart data={chartData} margin={{top:10, left:20, right:20, bottom:0}}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                    <XAxis dataKey="weekName" angle={-90} textAnchor="start" height={100} tick={{fontSize: 12, fontWeight: "bold", dy: 10, fill: "#475569"}} interval={0} axisLine={false} tickLine={false} />
-                    <YAxis hide />
-                    <RechartsTooltip formatter={(v:number)=> mode === 'amt' ? formatRial(v) : formatQty(v)}/>
-                    <Bar dataKey={mode === 'amt' ? 'netAmt' : 'netQty'} fill="#10b981" radius={[4,4,0,0]} />
-                 </BarChart>
-             </ResponsiveContainer>
+          <div className="h-[450px] border border-slate-200 rounded-xl p-4 bg-white shadow-sm flex flex-col">
+             <h4 className="text-center font-bold text-sm text-slate-600 mb-2 shrink-0">مجموع {mode === 'amt' ? 'ریالی' : 'تعدادی'} کل (ستون)</h4>
+             <div dir="ltr" className="w-full h-full flex-1 min-h-0 min-w-0">
+                 <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={chartData} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                        <XAxis dataKey="weekName" {...defaultXAxisProps}  />
+                        <YAxis {...defaultYAxisProps} />
+                        <RechartsTooltip formatter={(v:number)=> mode === 'amt' ? formatRial(v) : formatQty(v)}/>
+                        <Bar dataKey={mode === 'amt' ? 'netAmt' : 'netQty'} fill="#10b981" radius={[4,4,0,0]} />
+                    </BarChart>
+                 </ResponsiveContainer>
+             </div>
           </div>
       </div>
 
@@ -121,64 +153,63 @@ export function WeeklyReportsView() {
             </div>
         </div>
         <div className="overflow-x-auto print:overflow-visible w-full">
-            <table className="w-full text-right text-xs md:text-sm whitespace-nowrap table-auto print:font-mono">
+            <table className="w-full text-right text-xs md:text-sm whitespace-nowrap table-auto print:font-medium">
               <thead className="bg-slate-100 text-slate-600 font-semibold border-b print:border-black print:border-b-2 print:bg-white print:text-black">
                  <tr>
                     <th className="p-2 border-l border-slate-200 print:border-l-black border-b print:border-b-black text-center align-middle" rowSpan={2}>سطح ۱</th>
                     <th className="p-2 border-l border-slate-200 print:border-l-black border-b print:border-b-black text-center align-middle" rowSpan={2}>سطح ۲</th>
                     <th className="p-2 border-l border-slate-200 print:border-l-black border-b print:border-b-black text-center align-middle" rowSpan={2}>مرکز فعالیت</th>
-                    <th className="p-2 border-b text-center border-slate-300 print:border-b-black text-slate-800 print:text-black" colSpan={data.weeks.length}>
+                    <th className="p-2 border-b text-center border-slate-300 print:border-b-black text-slate-800 print:text-black" colSpan={data.weeks.length * 2}>
                         هفته (جدیدترین به قدیمی‌ترین)
                     </th>
                  </tr>
                  <tr>
                     {data.weeks.map((w: number) => (
-                       <th key={w} className="p-0 border-l border-b border-slate-200 print:border-l-black print:border-b-black">
-                          <div className="flex flex-col text-center divide-y divide-slate-200 print:divide-black">
-                             <span className="py-1.5 bg-slate-50 print:bg-white font-bold">{w}</span>
-                             <div className="flex divide-x divide-x-reverse divide-slate-200 print:divide-black text-[10px] md:text-[11px] text-slate-500 print:text-black">
-                                <span className="flex-1 w-1/2 py-1 px-1">رشد (%)</span>
-                                <span className="flex-1 w-1/2 py-1 px-1">{mode === 'amt' ? 'ریال' : 'تعداد'}</span>
-                             </div>
-                          </div>
-                       </th>
+                       <React.Fragment key={w}>
+                          <th className="p-1 px-2 border-l border-b border-t border-slate-200 print:border-l-black print:border-b-black text-center text-[11px] md:text-[13px]">
+                             <span className="block text-slate-400 font-normal">هفته {w}</span>
+                             <span>رشد (%)</span>
+                          </th>
+                          <th className="p-1 px-2 border-l border-b border-t border-slate-200 print:border-l-black print:border-b-black text-center text-[11px] md:text-[13px]">
+                             <span className="block text-white select-none">-</span>
+                             <span>{mode === 'amt' ? 'ریال' : 'تعداد'}</span>
+                          </th>
+                       </React.Fragment>
                     ))}
                  </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 print:divide-black text-slate-700 print:text-black">
                  {rows.map((row: any, idx: number) => (
                     <tr key={idx} className="hover:bg-slate-50 print:hover:bg-transparent print:break-inside-avoid">
-                       <td className="p-2 border-l border-slate-200 print:border-l-black whitespace-normal break-words w-[120px] max-w-[120px] print:w-auto print:max-w-none">{row.l1}</td>
-                       <td className="p-2 border-l border-slate-200 print:border-l-black whitespace-normal break-words w-[120px] max-w-[120px] print:w-auto print:max-w-none">{row.l2}</td>
-                       <td className="p-2 border-l border-slate-200 print:border-l-black whitespace-normal break-words w-[100px] max-w-[100px] print:w-auto print:max-w-none text-[11px]">{row.ac}</td>
+                       <td className="p-2 border-l border-slate-200 print:border-l-black text-right whitespace-normal break-words w-[120px] max-w-[120px] print:w-auto print:max-w-none">{row.l1}</td>
+                       <td className="p-2 border-l border-slate-200 print:border-l-black text-right whitespace-normal break-words w-[120px] max-w-[120px] print:w-auto print:max-w-none">{row.l2}</td>
+                       <td className="p-2 border-l border-slate-200 print:border-l-black text-right whitespace-normal break-words w-[100px] max-w-[100px] print:w-auto print:max-w-none text-[13px] font-bold">{row.ac}</td>
                        {data.weeks.map((w: number) => {
                            const val = mode === "amt" ? row.wAmt[`w${w}`] : row.wQty[`w${w}`];
                            const g = mode === "amt" ? row.wAmt[`g${w}`] : row.wQty[`g${w}`];
                            const gVal = (g * 100).toFixed(0) + '%';
+                           
                            let gColor = "text-slate-500";
-                           // For print we want just normal text, maybe let it stay black since print:text-black overrides
                            if (g > 0) gColor = "text-emerald-500 font-medium print:text-black";
                            else if (g < 0) gColor = "text-rose-500 font-medium print:text-black";
                            else gColor = "text-slate-400 print:text-black";
 
                            return (
-                               <td key={w} className="p-0 border-l border-slate-200 print:border-l-black align-middle text-center">
-                                  <div className="flex divide-x divide-x-reverse divide-slate-100 print:divide-black h-full min-h-[36px]">
-                                     <span className={`w-1/2 p-1.5 text-center text-[11px] flex items-center justify-center ${gColor} print:text-black`}>
-                                        {w > 1 ? gVal : '-'}
-                                     </span>
-                                     <span className="w-1/2 p-1.5 text-center flex items-center justify-center font-mono text-[11px] font-medium text-slate-800 print:text-black">
-                                        {val ? Number(val.toFixed(0)).toLocaleString() : '0'}
-                                     </span>
-                                  </div>
-                               </td>
+                               <React.Fragment key={w}>
+                                  <td className={`p-1.5 px-2 border-l border-slate-200 border-dashed print:border-l-black align-middle text-center text-[12px] font-bold ${gColor} print:text-black`}>
+                                     {w > 1 ? gVal : '-'}
+                                  </td>
+                                  <td className="p-1.5 px-2 border-l border-slate-200 print:border-l-black align-middle text-center font-bold text-[13px] text-slate-800 print:text-black bg-slate-50/30">
+                                     {val ? Number(val.toFixed(0)).toLocaleString() : '0'}
+                                  </td>
+                               </React.Fragment>
                            )
                        })}
                     </tr>
                  ))}
                  {rows.length === 0 && (
                     <tr>
-                       <td colSpan={data.weeks.length + 3} className="p-8 text-center text-slate-500">
+                       <td colSpan={data.weeks.length * 2 + 3} className="p-8 text-center text-slate-500">
                           رکوردی یافت نشد.
                        </td>
                     </tr>
@@ -203,7 +234,7 @@ export function WeeklyReportsView() {
             .print\\:text-black { color: #000 !important; }
             .print\\:block { display: block !important; }
             .print\\:overflow-visible { overflow: visible !important; }
-            .print\\:font-mono { font-family: monospace, sans-serif !important; }
+            .print\\:font-medium { font-family: monospace, sans-serif !important; }
             .print\\:border-black { border-color: #000 !important; border-width: 1px !important; }
             .print\\:border-l-black { border-left-color: #000 !important; border-left-width: 1px !important;}
             .print\\:border-b-black { border-bottom-color: #000 !important; border-bottom-width: 1px !important;}

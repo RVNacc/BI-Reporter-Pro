@@ -38,17 +38,20 @@ db.function('isInPeriod', (dateStr, periodStr) => {
   
   if (periodStr.startsWith('ADV:')) {
      const pOptions = periodStr.substring(4).split('|');
-     const targetY = pOptions[0] ? parseInt(pOptions[0], 10) : null;
-     const targetM = pOptions[1] ? parseInt(pOptions[1], 10) : null;
-     const targetW = pOptions[2] ? parseInt(pOptions[2], 10) : null;
+     
+     const parseArr = (str?: string) => str ? str.split(',').map(v => parseInt(v, 10)).filter(v => !isNaN(v)) : null;
+     
+     const targetYArr = parseArr(pOptions[0]);
+     const targetMArr = parseArr(pOptions[1]);
+     const targetWArr = parseArr(pOptions[2]);
      const d = match[4] ? parseInt(match[4], 10) : 1;
      
-     if (targetY !== null && !isNaN(targetY) && y !== targetY) return 0;
-     if (targetM !== null && !isNaN(targetM) && m !== targetM) return 0;
-     if (targetW !== null && !isNaN(targetW)) {
+     if (targetYArr && targetYArr.length > 0 && !targetYArr.includes(y)) return 0;
+     if (targetMArr && targetMArr.length > 0 && !targetMArr.includes(m)) return 0;
+     if (targetWArr && targetWArr.length > 0) {
         const dayOfYear = m <= 6 ? (m - 1) * 31 + d : 186 + (m - 7) * 30 + d;
         const weekOfYear = Math.floor((dayOfYear - 1) / 7) + 1;
-        if (weekOfYear !== targetW) return 0;
+        if (!targetWArr.includes(weekOfYear)) return 0;
      }
      return 1;
   }
@@ -217,7 +220,11 @@ app.post("/api/upload-commit", (req, res) => {
         const normalizedRow: any = {};
         for (const [sysKey, exKey] of Object.entries(mappings)) {
           if (exKey && row[exKey as string] !== undefined && row[exKey as string] !== null) {
-            normalizedRow[sysKey] = String(row[exKey as string]).trim();
+            let val = String(row[exKey as string]).trim();
+            if (['quantity', 'price', 'totalPrice', 'costPrice', 'lastPurchasePrice', 'amount', 'vatAmount', 'discount', 'openingBalance', 'volume'].includes(sysKey)) {
+                val = val.replace(/,/g, '');
+            }
+            normalizedRow[sysKey] = val;
           }
         }
         insertData.run(fileId, JSON.stringify(normalizedRow));
@@ -592,31 +599,20 @@ app.get("/api/reports/cost-allocation", (req, res) => {
       )
       .iterate();
 
-    // 2. Get all sales (Only specific json fields to avoid JSON.parse overhead)
-    const sales = db
+    // 2 & 3. Get all transactions (Sales, Purchases, Returns)
+    const transactions = db
       .prepare(
         `
       SELECT 
        json_extract(data, '$.productCode') as code,
-       CAST(json_extract(data, '$.quantity') AS REAL) as qty,
+       CAST(REPLACE(json_extract(data, '$.quantity'), ',', '') AS REAL) as qty,
        CAST(coalesce(json_extract(data, '$.totalPrice'), json_extract(data, '$.price')) AS REAL) as price,
-       json_extract(data, '$.invoiceCode') as invCode
-      FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type = 'sales'
-    `,
-      )
-      .iterate();
-
-    // 3. Get all purchases
-    const purchases = db
-      .prepare(
-        `
-      SELECT 
-       json_extract(data, '$.productCode') as code,
-       CAST(json_extract(data, '$.quantity') AS REAL) as qty,
-       CAST(coalesce(json_extract(data, '$.totalPrice'), json_extract(data, '$.price')) AS REAL) as price,
-       json_extract(data, '$.receiptCode') as recCode
-      FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type = 'purchases'
-    `,
+       json_extract(data, '$.invoiceCode') as invCode,
+       json_extract(data, '$.receiptCode') as recCode,
+       SUBSTR(coalesce(json_extract(data, '$.time'), '12:00'), 1, 2) as hour,
+       f.module_type
+      FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type IN ('sales', 'purchases', 'sales_returns', 'purchase_returns')
+    `
       )
       .iterate();
 
@@ -646,53 +642,58 @@ app.get("/api/reports/cost-allocation", (req, res) => {
     let totalGlobalSales = 0;
     let totalGlobalPurchases = 0;
 
-    for (const s of sales) {
-      const row = s as any;
+    for (const t of transactions) {
+      const row = t as any;
       const code = row.code;
       const catKey = productCategoryMap[code] || "سایر|سایر";
       if (!categoryTotals[catKey])
         categoryTotals[catKey] = {
-          salesAmt: 0, purchaseAmt: 0,
-          qtySales: 0, qtyPurchase: 0,
-          sInvoices: new Set(), pInvoices: new Set(),
-          sLines: 0, pLines: 0,
+          salesAmt: 0, purchaseAmt: 0, salesRetAmt: 0, pRetAmt: 0,
+          qtySales: 0, qtyPurchase: 0, qtySalesRet: 0, qtyPRet: 0,
+          sInvoices: new Set(), pInvoices: new Set(), sRetInvoices: new Set(), pRetInvoices: new Set(),
+          sLines: 0, pLines: 0, sRetLines: 0, pRetLines: 0,
+          sPriceTotal: 0, pPriceTotal: 0, sRetPriceTotal: 0, pRetPriceTotal: 0,
+          sHours: 0, pHours: 0, sRetHours: 0, pRetHours: 0,
           allocatedCost: 0
         };
 
-      const sVal = (row.qty || 0) * (row.price || 0);
-      const sQty = row.qty || 0;
+      const val = (row.qty || 0) * (row.price || 0);
+      const qty = row.qty || 0;
+      const price = row.price || 0;
+      const invCode = String(row.invCode || row.recCode || "unknown");
+      const hourStr = row.hour ? String(row.hour).replace(/\D/g, '') : "12";
+      const hour = parseInt(hourStr) || 12;
 
-      categoryTotals[catKey].salesAmt += sVal;
-      categoryTotals[catKey].qtySales += sQty;
-      categoryTotals[catKey].sLines += 1;
-      totalGlobalSales += sVal;
-      if (row.invCode) {
-        categoryTotals[catKey].sInvoices.add(String(row.invCode));
-      }
-    }
-
-    for (const p of purchases) {
-      const row = p as any;
-      const code = row.code;
-      const catKey = productCategoryMap[code] || "سایر|سایر";
-      if (!categoryTotals[catKey])
-        categoryTotals[catKey] = {
-          salesAmt: 0, purchaseAmt: 0,
-          qtySales: 0, qtyPurchase: 0,
-          sInvoices: new Set(), pInvoices: new Set(),
-          sLines: 0, pLines: 0,
-          allocatedCost: 0
-        };
-
-      const pVal = (row.qty || 0) * (row.price || 0);
-      const pQty = row.qty || 0;
-
-      categoryTotals[catKey].purchaseAmt += pVal;
-      categoryTotals[catKey].qtyPurchase += pQty;
-      categoryTotals[catKey].pLines += 1;
-      totalGlobalPurchases += pVal;
-      if (row.recCode) {
-        categoryTotals[catKey].pInvoices.add(String(row.recCode));
+      if (row.module_type === 'sales') {
+        categoryTotals[catKey].salesAmt += val;
+        categoryTotals[catKey].qtySales += qty;
+        categoryTotals[catKey].sLines += 1;
+        categoryTotals[catKey].sPriceTotal += price;
+        categoryTotals[catKey].sHours += hour;
+        categoryTotals[catKey].sInvoices.add(invCode);
+        totalGlobalSales += val;
+      } else if (row.module_type === 'purchases') {
+        categoryTotals[catKey].purchaseAmt += val;
+        categoryTotals[catKey].qtyPurchase += qty;
+        categoryTotals[catKey].pLines += 1;
+        categoryTotals[catKey].pPriceTotal += price;
+        categoryTotals[catKey].pHours += hour;
+        categoryTotals[catKey].pInvoices.add(invCode);
+        totalGlobalPurchases += val;
+      } else if (row.module_type === 'sales_returns') {
+        categoryTotals[catKey].salesRetAmt += val;
+        categoryTotals[catKey].qtySalesRet += qty;
+        categoryTotals[catKey].sRetLines += 1;
+        categoryTotals[catKey].sRetPriceTotal += price;
+        categoryTotals[catKey].sRetHours += hour;
+        categoryTotals[catKey].sRetInvoices.add(invCode);
+      } else if (row.module_type === 'purchase_returns') {
+        categoryTotals[catKey].pRetAmt += val;
+        categoryTotals[catKey].qtyPRet += qty;
+        categoryTotals[catKey].pRetLines += 1;
+        categoryTotals[catKey].pRetPriceTotal += price;
+        categoryTotals[catKey].pRetHours += hour;
+        categoryTotals[catKey].pRetInvoices.add(invCode);
       }
     }
 
@@ -711,6 +712,7 @@ app.get("/api/reports/cost-allocation", (req, res) => {
       }
 
       const getBaseValue = (cat: any) => {
+         // Original Bases
          if (cc.allocation_base === "sales_value" || cc.allocation_base === "sales_price") return cat.salesAmt;
          if (cc.allocation_base === "purchase_value" || cc.allocation_base === "purchase_price") return cat.purchaseAmt;
          if (cc.allocation_base === "sales_qty") return cat.qtySales;
@@ -718,6 +720,18 @@ app.get("/api/reports/cost-allocation", (req, res) => {
          if (cc.allocation_base === "sales_invoice_count") return cat.sInvoices.size;
          if (cc.allocation_base === "purchase_invoice_count") return cat.pInvoices.size;
          if (cc.allocation_base === "time_spent") return cat.sLines; // Time spent corresponds to sales lines processing
+         
+         // New Combined Bases
+         if (cc.allocation_base === "sales_and_purchase_qty") return cat.qtySales + cat.qtyPurchase;
+         if (cc.allocation_base === "sales_and_purchase_value") return cat.salesAmt + cat.purchaseAmt;
+         if (cc.allocation_base === "sales_and_purchase_hours") return cat.sHours + cat.pHours;
+         if (cc.allocation_base === "sales_and_purchase_invoice_count") return cat.sInvoices.size + cat.pInvoices.size;
+         if (cc.allocation_base === "sales_and_purchase_price") return cat.sPriceTotal + cat.pPriceTotal;
+         if (cc.allocation_base === "sales_and_purchase_and_returns_price") return cat.sPriceTotal + cat.pPriceTotal + cat.sRetPriceTotal + cat.pRetPriceTotal;
+         if (cc.allocation_base === "sales_and_purchase_and_returns_invoice_count") return cat.sInvoices.size + cat.pInvoices.size + cat.sRetInvoices.size + cat.pRetInvoices.size;
+         if (cc.allocation_base === "sales_and_purchase_and_returns_qty") return cat.qtySales + cat.qtyPurchase + cat.qtySalesRet + cat.qtyPRet;
+         if (cc.allocation_base === "sales_and_purchase_and_returns_hours") return cat.sHours + cat.pHours + cat.sRetHours + cat.pRetHours;
+
          return cat.salesAmt; // fallback
       };
 
@@ -868,7 +882,7 @@ app.get("/api/reports/pareto", (req, res) => {
     }
 
     // 2. Get Sales data including returns
-    const sales = db.prepare("SELECT json_extract(data, '$.productCode') as code, json_extract(data, '$.productName') as name, CAST(json_extract(data, '$.quantity') AS REAL) as qty, CAST(coalesce(json_extract(data, '$.totalPrice'), json_extract(data, '$.price')) AS REAL) as price, json_extract(data, '$.invoiceCode') as invCode, json_extract(data, '$.date') as date, f.module_type FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type IN ('sales', 'sales_returns') AND isInPeriod(json_extract(data, '$.date'), ?) = 1").iterate(period);
+    const sales = db.prepare("SELECT json_extract(data, '$.productCode') as code, json_extract(data, '$.productName') as name, CAST(REPLACE(json_extract(data, '$.quantity'), ',', '') AS REAL) as qty, CAST(coalesce(json_extract(data, '$.totalPrice'), json_extract(data, '$.price')) AS REAL) as price, json_extract(data, '$.invoiceCode') as invCode, json_extract(data, '$.date') as date, f.module_type FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type IN ('sales', 'sales_returns') AND isInPeriod(json_extract(data, '$.date'), ?) = 1").iterate(period);
 
     // Dictionaries for aggregation
     const productStats: Record<string, { qty: number, amt: number, code: string, name: string, l1: string, l2: string, invoices: Set<string> }> = {};
@@ -1065,7 +1079,7 @@ app.get("/api/reports/weekly", (req, res) => {
     }
 
     // 2. Get Sales data
-    const sales = db.prepare("SELECT json_extract(data, '$.productCode') as code, CAST(json_extract(data, '$.quantity') AS REAL) as qty, CAST(coalesce(json_extract(data, '$.totalPrice'), json_extract(data, '$.price')) AS REAL) as price, json_extract(data, '$.date') as date, f.module_type FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type IN ('sales', 'sales_returns') AND isInPeriod(json_extract(data, '$.date'), ?) = 1").iterate(period);
+    const sales = db.prepare("SELECT json_extract(data, '$.productCode') as code, CAST(REPLACE(json_extract(data, '$.quantity'), ',', '') AS REAL) as qty, CAST(coalesce(json_extract(data, '$.totalPrice'), json_extract(data, '$.price')) AS REAL) as price, json_extract(data, '$.date') as date, f.module_type FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type IN ('sales', 'sales_returns') AND isInPeriod(json_extract(data, '$.date'), ?) = 1").iterate(period);
     
     const salesRows: any[] = [];
     let minJDN = Infinity;
@@ -1159,9 +1173,9 @@ app.get("/api/reports/sales", (req, res) => {
        if (row.code) pMap[row.code] = { name: row.name || 'نامشخص', mainGrp: row.mainGrp || 'نامشخص', subGrp: row.subGrp || 'نامشخص' };
     }
 
-    const sales = db.prepare("SELECT json_extract(data, '$.productCode') as code, json_extract(data, '$.productName') as name, CAST(json_extract(data, '$.quantity') AS REAL) as qty, CAST(coalesce(json_extract(data, '$.totalPrice'), json_extract(data, '$.price')) AS REAL) as price, SUBSTR(coalesce(json_extract(data, '$.time'), '12:00'), 1, 2) as hour, f.module_type FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type IN ('sales', 'sales_returns') AND isInPeriod(json_extract(data, '$.date'), ?) = 1").iterate(period);
+    const sales = db.prepare("SELECT json_extract(data, '$.productCode') as code, json_extract(data, '$.productName') as name, CAST(REPLACE(json_extract(data, '$.quantity'), ',', '') AS REAL) as qty, CAST(coalesce(json_extract(data, '$.totalPrice'), json_extract(data, '$.price')) AS REAL) as price, SUBSTR(coalesce(json_extract(data, '$.time'), '12:00'), 1, 2) as hour, f.module_type FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type IN ('sales', 'sales_returns') AND isInPeriod(json_extract(data, '$.date'), ?) = 1").iterate(period);
 
-    const purchases = db.prepare("SELECT json_extract(data, '$.productCode') as code, CAST(json_extract(data, '$.quantity') AS REAL) as qty, CAST(coalesce(json_extract(data, '$.totalPrice'), json_extract(data, '$.price')) AS REAL) as price, f.module_type FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type IN ('purchases', 'purchase_returns') AND isInPeriod(json_extract(data, '$.date'), ?) = 1").iterate(period);
+    const purchases = db.prepare("SELECT json_extract(data, '$.productCode') as code, CAST(REPLACE(json_extract(data, '$.quantity'), ',', '') AS REAL) as qty, CAST(coalesce(json_extract(data, '$.totalPrice'), json_extract(data, '$.price')) AS REAL) as price, f.module_type FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type IN ('purchases', 'purchase_returns') AND isInPeriod(json_extract(data, '$.date'), ?) = 1").iterate(period);
 
     let totalVolume = 0;
     let totalQty = 0;
@@ -1334,7 +1348,7 @@ app.get("/api/reports/inventory", (req, res) => {
        if (row.code) pMap[row.code] = { name: row.name || 'نامشخص', mainGrp: row.mainGrp || 'نامشخص', subGrp: row.subGrp || 'نامشخص' };
     }
 
-    const purchReturns = db.prepare("SELECT json_extract(data, '$.productCode') as code, json_extract(data, '$.productName') as name, CAST(json_extract(data, '$.quantity') AS REAL) as qty, CAST(coalesce(json_extract(data, '$.totalPrice'), json_extract(data, '$.price')) AS REAL) as price FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type = 'purchase_returns' AND isInPeriod(json_extract(data, '$.date'), ?) = 1").iterate(period);
+    const purchReturns = db.prepare("SELECT json_extract(data, '$.productCode') as code, json_extract(data, '$.productName') as name, CAST(REPLACE(json_extract(data, '$.quantity'), ',', '') AS REAL) as qty, CAST(coalesce(json_extract(data, '$.totalPrice'), json_extract(data, '$.price')) AS REAL) as price FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type = 'purchase_returns' AND isInPeriod(json_extract(data, '$.date'), ?) = 1").iterate(period);
 
     const retL1: Record<string, any> = {};
     const retL2: Record<string, any> = {};
@@ -1402,10 +1416,10 @@ app.get("/api/reports/profit", (req, res) => {
       json_extract(data, '$.date') as date,
       json_extract(data, '$.productCode') as code,
       json_extract(data, '$.productName') as productName,
-      CAST(json_extract(data, '$.quantity') AS REAL) as qty,
-      CAST(json_extract(data, '$.price') AS REAL) as price,
-      CAST(json_extract(data, '$.costPrice') AS REAL) as costPrice,
-      CAST(json_extract(data, '$.lastPurchasePrice') AS REAL) as lastPurchasePrice,
+      CAST(REPLACE(json_extract(data, '$.quantity'), ',', '') AS REAL) as qty,
+      CAST(REPLACE(json_extract(data, '$.price'), ',', '') AS REAL) as price,
+      CAST(REPLACE(json_extract(data, '$.costPrice'), ',', '') AS REAL) as costPrice,
+      CAST(REPLACE(json_extract(data, '$.lastPurchasePrice'), ',', '') AS REAL) as lastPurchasePrice,
       f.module_type
       FROM raw_data r JOIN files f ON r.file_id = f.id 
       WHERE f.module_type IN ('sales', 'sales_returns') AND isInPeriod(json_extract(data, '$.date'), ?) = 1`).iterate(period);
@@ -1436,7 +1450,7 @@ app.get("/api/reports/profit", (req, res) => {
        if (cp > 0 && lpp > 0) {
            if (p < cp && p < lpp) {
                isLoss = true;
-               profitLossPerUnit = p - Math.min(cp, lpp); 
+               profitLossPerUnit = p - lpp; 
            } else if (p > cp && p > lpp) {
                isProfit = true;
                profitLossPerUnit = p - Math.max(cp, lpp); 
@@ -1469,7 +1483,7 @@ app.get("/api/reports/profit", (req, res) => {
        }
        
        const totalProfitLossRaw = profitLossPerUnit * qty;
-       let status = isLoss ? "loss" : (isProfit ? "profit" : "breakeven");
+       // let status = isLoss ? "loss" : (isProfit ? "profit" : "breakeven");
 
        transactionRows.push({
            date: row.date,
@@ -1483,12 +1497,64 @@ app.get("/api/reports/profit", (req, res) => {
            totalSales: p * qty,
            profitLossPerUnit: profitLossPerUnit,
            totalProfitLoss: totalProfitLossRaw,
-           status: status,
+           // status: status,
            l1: pInfo.l1,
            l2: pInfo.l2
        });
     }
-    res.json({ rows: transactionRows });
+
+    const dayRowsMap: Record<string, any> = {};
+    const rangeAgg: Record<string, any> = {};
+    const l1Agg: Record<string, any> = {};
+    const l2Agg: Record<string, any> = {};
+
+    transactionRows.forEach(r => {
+       const dayKey = `${r.date}_${r.code}`;
+       if (!dayRowsMap[dayKey]) {
+          dayRowsMap[dayKey] = { ...r, qty: 0, totalSales: 0, totalProfitLoss: 0, count: 0 };
+       }
+       dayRowsMap[dayKey].qty += r.qty;
+       dayRowsMap[dayKey].totalSales += r.totalSales;
+       dayRowsMap[dayKey].totalProfitLoss += r.totalProfitLoss;
+       dayRowsMap[dayKey].count += 1;
+
+       if (!rangeAgg[r.code]) {
+          rangeAgg[r.code] = { ...r, qty: 0, totalSales: 0, totalProfitLoss: 0, count: 0 };
+       }
+       rangeAgg[r.code].qty += r.qty;
+       rangeAgg[r.code].totalSales += r.totalSales;
+       rangeAgg[r.code].totalProfitLoss += r.totalProfitLoss;
+       rangeAgg[r.code].count += 1;
+
+       const l1 = r.l1 || 'سایر';
+       if (!l1Agg[l1]) l1Agg[l1] = { name: l1, totalSales: 0, profit: 0, loss: 0, net: 0, count: 0 };
+       l1Agg[l1].totalSales += r.totalSales;
+       l1Agg[l1].net += r.totalProfitLoss;
+       l1Agg[l1].count += 1;
+       if (r.totalProfitLoss > 0) l1Agg[l1].profit += r.totalProfitLoss;
+       if (r.totalProfitLoss < 0) l1Agg[l1].loss += Math.abs(r.totalProfitLoss);
+
+       const l2Key = l1 + '::' + (r.l2 || 'سایر');
+       if (!l2Agg[l2Key]) l2Agg[l2Key] = { l1: l1, l2: r.l2 || 'سایر', totalSales: 0, profit: 0, loss: 0, net: 0, count: 0 };
+       l2Agg[l2Key].totalSales += r.totalSales;
+       l2Agg[l2Key].net += r.totalProfitLoss;
+       l2Agg[l2Key].count += 1;
+       if (r.totalProfitLoss > 0) l2Agg[l2Key].profit += r.totalProfitLoss;
+       if (r.totalProfitLoss < 0) l2Agg[l2Key].loss += Math.abs(r.totalProfitLoss);
+    });
+
+    Object.values(dayRowsMap).forEach(d => {
+       if (d.qty > 0) d.profitLossPerUnit = d.totalProfitLoss / d.qty;
+    });
+
+    res.json({ 
+       dayRows: Object.values(dayRowsMap),
+       rangeAggregated: Object.values(rangeAgg),
+       hierarchyAggregated: {
+           l1: Object.values(l1Agg),
+           l2: Object.values(l2Agg)
+       }
+    });
   } catch(e) {
     console.error("Profit Error:", e);
     res.status(500).json({error: "Failed to generate profit reports"});
@@ -1543,27 +1609,488 @@ app.get("/api/export-excel", (req, res) => {
 
 app.get("/api/reports/hr", (req, res) => {
   const period = (req.query.period as string) || "";
-  const rows = db
+  
+  // 1. Fetch Sales Data for efficiency (cashier performance)
+  const salesRows = db
     .prepare(
       `
     SELECT 
       coalesce(json_extract(data, '$.cashierCode'), json_extract(data, '$.costCenter'), 'نامشخص') as employee,
-      COUNT(*) as scans
+      json_extract(data, '$.date') as date,
+      json_extract(data, '$.time') as time,
+      CAST(REPLACE(json_extract(data, '$.quantity'), ',', '') AS REAL) as qty,
+      CAST(coalesce(json_extract(data, '$.totalPrice'), json_extract(data, '$.price')) AS REAL) as price,
+      json_extract(data, '$.invoiceCode') as invCode
     FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type = 'sales'
     AND isInPeriod(json_extract(data, '$.date'), ?) = 1
-    GROUP BY coalesce(json_extract(data, '$.cashierCode'), json_extract(data, '$.costCenter'), 'نامشخص')
-    ORDER BY scans DESC
-  `,
+  `
     )
-    .all(period);
+    .all(period) as any[];
 
-  const commissionArr = rows.map((row: any) => ({
-    employee: row.employee,
-    scans: row.scans,
-    accuracy: 100, // Not able to know without HR file
-  }));
+  // 2. Fetch HR (Attendance) Data
+  const hrRows = db.prepare(`
+    SELECT 
+      json_extract(data, '$.personnelCode') as personnelCode,
+      json_extract(data, '$.personnelName') as personnelName,
+      json_extract(data, '$.role') as role,
+      json_extract(data, '$.costCenter') as costCenter,
+      json_extract(data, '$.startDate') as startDate,
+      json_extract(data, '$.endDate') as endDate,
+      json_extract(data, '$.date') as date,
+      json_extract(data, '$.entranceTime') as entranceTime,
+      json_extract(data, '$.exitTime') as exitTime
+    FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type = 'hr'
+    AND isInPeriod(json_extract(data, '$.date'), ?) = 1
+  `).all(period) as any[];
 
-  res.json({ commissionArr, efficiencyArr: [] });
+  // Data maps
+  const employeeStats: Record<string, any> = {};
+  
+  // Helper to init employee
+  const initEmp = (id: string, name: string) => {
+    if (!employeeStats[id]) {
+      employeeStats[id] = {
+        code: id,
+        name: name,
+        role: "نامشخص",
+        costCenter: "نامشخص",
+        startDate: "",
+        endDate: "",
+        salesScans: 0,
+        salesQty: 0,
+        salesValue: 0,
+        invoiceCount: new Set(),
+        workingDays: 0,
+        workingHours: 0,
+        missingExit: 0,
+        lateArrivals: 0, // hypothetical logic: entered after 09:00
+        overtimeHours: 0 // > 8h / day
+      };
+    }
+  };
+
+  // Process HR Attendance
+  for (const hr of hrRows) {
+    const code = hr.personnelCode || "نامشخص";
+    const name = hr.personnelName || code;
+    initEmp(code, name);
+    
+    if (hr.role && employeeStats[code].role === "نامشخص") employeeStats[code].role = hr.role;
+    if (hr.costCenter && employeeStats[code].costCenter === "نامشخص") employeeStats[code].costCenter = hr.costCenter;
+    if (hr.startDate && !employeeStats[code].startDate) employeeStats[code].startDate = hr.startDate;
+    if (hr.endDate && !employeeStats[code].endDate) employeeStats[code].endDate = hr.endDate;
+
+    employeeStats[code].workingDays += 1;
+
+    if (hr.entranceTime && hr.exitTime) {
+       const [eh, em] = String(hr.entranceTime).split(":").map(Number);
+       const [xh, xm] = String(hr.exitTime).split(":").map(Number);
+       if (!isNaN(eh) && !isNaN(xh)) {
+          let hours = xh - eh + (xm - em) / 60;
+          if (hours < 0) hours += 24; // night shift
+          employeeStats[code].workingHours += hours;
+          
+          if (eh >= 9 && em > 15) {
+             employeeStats[code].lateArrivals += 1; // Assuming 09:00 is standard start
+          }
+          if (hours > 8) {
+             employeeStats[code].overtimeHours += (hours - 8);
+          }
+       }
+    } else {
+       employeeStats[code].missingExit += 1;
+    }
+  }
+
+  // Process Sales (Efficiency & Commission)
+  for (const s of salesRows) {
+    const code = s.employee || "نامشخص";
+    initEmp(code, code); // fallback name to code if hr data is missing
+    
+    employeeStats[code].salesScans += 1;
+    employeeStats[code].salesQty += (s.qty || 0);
+    employeeStats[code].salesValue += ((s.qty || 0) * (s.price || 0));
+    if (s.invCode) employeeStats[code].invoiceCount.add(s.invCode);
+  }
+
+  // Overall Org Stats
+  const orgStats = {
+    totalEmployees: Object.keys(employeeStats).length,
+    activeEmployees: 0,
+    newJoiners: 0,
+    leavers: 0,
+    rolesDistribution: {} as Record<string, number>,
+    costCenterDistribution: {} as Record<string, number>
+  };
+
+  // Finalize data arrays
+  const hrAnalytics = Object.values(employeeStats).map((emp: any) => {
+    
+    // Org Tracking
+    if (emp.role && emp.role !== "نامشخص") {
+        orgStats.rolesDistribution[emp.role] = (orgStats.rolesDistribution[emp.role] || 0) + 1;
+    }
+    if (emp.costCenter && emp.costCenter !== "نامشخص") {
+        orgStats.costCenterDistribution[emp.costCenter] = (orgStats.costCenterDistribution[emp.costCenter] || 0) + 1;
+    }
+    
+    const isLeaver = !!emp.endDate;
+    if (isLeaver) orgStats.leavers++;
+    else orgStats.activeEmployees++;
+
+    if (emp.startDate && period === emp.startDate) {
+        // This is a naive check; ideally we use an isInPeriod logic on startDate,
+        // but for demo, just incrementing if they joined
+        orgStats.newJoiners++;
+    }
+
+    // commission stats
+    const commAmt = emp.salesScans; // we will multiply by rate in frontend
+    
+    // efficiency stats
+    let itemsPerMinute = 0;
+    if (emp.workingHours > 0) {
+      itemsPerMinute = emp.salesScans / (emp.workingHours * 60);
+    } else if (emp.workingDays === 0 && emp.salesScans > 0) {
+       // if no hr records but they sold, estimate 8 hours a day for days they sold
+       // This is a naive fallback if HR data isn't provided
+       itemsPerMinute = emp.salesScans / (8 * 60); 
+    }
+
+    // Determine performance score dynamically based on items per minute vs an expected baseline (e.g. 10 items/min is standard)
+    let avgPerf = 0;
+    if (itemsPerMinute > 0) {
+        avgPerf = Math.min(Math.round((itemsPerMinute / 10) * 100), 100);
+    }
+
+    return {
+      employeeCode: emp.code,
+      employeeName: emp.name !== emp.code ? emp.name : emp.code,
+      role: emp.role,
+      costCenter: emp.costCenter,
+      startDate: emp.startDate,
+      endDate: emp.endDate,
+      active: !isLeaver,
+      scans: emp.salesScans,
+      salesQty: emp.salesQty,
+      salesValue: emp.salesValue,
+      invoiceCount: emp.invoiceCount.size,
+      workingDays: emp.workingDays,
+      workingHours: Number(emp.workingHours.toFixed(1)),
+      lateArrivals: emp.lateArrivals,
+      overtimeHours: Number(emp.overtimeHours.toFixed(1)),
+      missingExit: emp.missingExit,
+      itemsPerMinute: Number(itemsPerMinute.toFixed(2)),
+      perfScore: Number(avgPerf.toFixed(1)),
+      basketSize: emp.invoiceCount.size > 0 ? Number((emp.salesQty / emp.invoiceCount.size).toFixed(1)) : 0,
+      basketValue: emp.invoiceCount.size > 0 ? Number((emp.salesValue / emp.invoiceCount.size).toFixed(0)) : 0,
+    };
+  }).sort((a, b) => b.scans - a.scans);
+
+  // Time-based traffic vs headcount (Weekly/Monthly view simulation)
+  // For simplicity, aggregate sales by date to form trend
+  const dateMap: Record<string, { date: string; salesAmt: number; txCount: number }> = {};
+  for (const s of salesRows) {
+     if (!s.date) continue;
+     if (!dateMap[s.date]) dateMap[s.date] = { date: s.date, salesAmt: 0, txCount: 0 };
+     dateMap[s.date].salesAmt += ((s.qty||0)*(s.price||0));
+     dateMap[s.date].txCount += 1;
+  }
+  const trendArr = Object.values(dateMap).sort((a,b)=>a.date.localeCompare(b.date));
+
+  // Hourly Workload (Shift Optimization)
+  const hourlyTraffic: Record<number, { hour: string; txCount: number; staffHours: number; salesValue: number }> = {};
+  for(let i=0; i<24; i++) hourlyTraffic[i] = { hour: `${i.toString().padStart(2, '0')}:00`, txCount: 0, staffHours: 0, salesValue: 0 };
+
+  for (const s of salesRows) {
+      if (s.time) {
+          let h = parseInt(String(s.time).split(':')[0]);
+          if (!isNaN(h) && h >= 0 && h < 24) {
+              hourlyTraffic[h].txCount += 1;
+              hourlyTraffic[h].salesValue += (s.price || 0) * (s.qty || 0);
+          }
+      }
+  }
+
+  for (const hr of hrRows) {
+      if (hr.entranceTime && hr.exitTime) {
+          const [eh, em] = String(hr.entranceTime).split(':').map(Number);
+          const [xh, xm] = String(hr.exitTime).split(':').map(Number);
+          if (!isNaN(eh) && !isNaN(xh)) {
+              let start = eh;
+              let end = xh;
+              if (end < start) end += 24;
+              for(let h = start; h <= end; h++) {
+                  hourlyTraffic[h % 24].staffHours += 1;
+              }
+          }
+      }
+  }
+  
+  const hourlyArr = Object.values(hourlyTraffic);
+
+  // Overall KPIs
+  const totalSalesValue = salesRows.reduce((acc, s) => acc + ((s.qty || 0) * (s.price || 0)), 0);
+  const totalStaffHours = Object.values(employeeStats).reduce((acc: any, emp: any) => acc + emp.workingHours, 0);
+  const totalTransactions = salesRows.length;
+  
+  const kpis = {
+    revenuePerStaffHour: totalStaffHours > 0 ? totalSalesValue / totalStaffHours : 0,
+    txPerStaffHour: totalStaffHours > 0 ? totalTransactions / totalStaffHours : 0,
+    totalWorkingHours: totalStaffHours,
+    overtimeRatio: totalStaffHours > 0 ? (Object.values(employeeStats).reduce((acc: any, emp: any) => acc + emp.overtimeHours, 0) / totalStaffHours) * 100 : 0
+  };
+
+  res.json({ 
+    hrAnalytics,
+    trendArr,
+    hourlyArr,
+    kpis,
+    orgStats
+  });
+});
+
+app.get("/api/reports/advanced-bi", (req, res) => {
+  try {
+    const period = (req.query.period as string) || "";
+
+    // 1. Products base mapping
+    const products = db.prepare("SELECT json_extract(data, '$.productCode') as code, json_extract(data, '$.productName') as name, json_extract(data, '$.mainGroup') as mainGrp, json_extract(data, '$.subGroup') as subGrp FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type = 'products'").all() as any[];
+    const pMap: Record<string, any> = {};
+    for (const p of products) {
+       if (p.code) {
+         pMap[p.code] = { 
+           name: p.name || 'نامشخص', 
+           mainGrp: p.mainGrp || 'سایر', 
+           subGrp: p.subGrp || 'سایر' 
+         };
+       }
+    }
+
+    // 2. Weekday Sales Density Analysis
+    const salesData = db.prepare(`
+      SELECT 
+        json_extract(data, '$.date') as date,
+        CAST(REPLACE(json_extract(data, '$.quantity'), ',', '') AS REAL) as qty,
+        CAST(coalesce(json_extract(data, '$.totalPrice'), json_extract(data, '$.price')) AS REAL) as price,
+        f.module_type
+      FROM raw_data r JOIN files f ON r.file_id = f.id
+      WHERE f.module_type IN ('sales', 'sales_returns')
+      AND isInPeriod(json_extract(data, '$.date'), ?) = 1
+    `).all(period) as any[];
+
+    const weekdayMap: Record<string, { name: string; salesAmt: number; txCount: number }> = {
+      "شنبه": { name: "شنبه", salesAmt: 0, txCount: 0 },
+      "یکشنبه": { name: "یکشنبه", salesAmt: 0, txCount: 0 },
+      "دوشنبه": { name: "دوشنبه", salesAmt: 0, txCount: 0 },
+      "سه‌شنبه": { name: "سه‌شنبه", salesAmt: 0, txCount: 0 },
+      "چهارشنبه": { name: "چهارشنبه", salesAmt: 0, txCount: 0 },
+      "پنجشنبه": { name: "پنجشنبه", salesAmt: 0, txCount: 0 },
+      "جمعه": { name: "جمعه", salesAmt: 0, txCount: 0 },
+    };
+
+    function getJalaaliWeekday(dateStr: string): string {
+      const weekdays = ["یکشنبه", "دوشنبه", "سه‌شنبه", "چهارشنبه", "پنجشنبه", "جمعه", "شنبه"];
+      try {
+        if (!dateStr || typeof dateStr !== "string") return "شنبه";
+        const parts = dateStr.split('/');
+        if (parts.length === 3) {
+          const jy = parseInt(parts[0], 10);
+          const jm = parseInt(parts[1], 10);
+          const jd = parseInt(parts[2], 10);
+          const g = jalaali.toGregorian(jy, jm, jd);
+          const gd = new Date(g.gy, g.gm - 1, g.gd);
+          return weekdays[gd.getDay()];
+        }
+      } catch (e) {}
+      return "شنبه";
+    }
+
+    for (const s of salesData) {
+      if (!s.date) continue;
+      const day = getJalaaliWeekday(s.date);
+      const isReturn = s.module_type === "sales_returns";
+      const q = s.qty || 0;
+      const p = s.price || 0;
+      const amt = q * p * (isReturn ? -1 : 1);
+
+      if (weekdayMap[day]) {
+        weekdayMap[day].salesAmt += amt;
+        if (!isReturn) {
+          weekdayMap[day].txCount += 1;
+        }
+      }
+    }
+    const weekdayArr = Object.values(weekdayMap);
+
+    // 3. Basket Pairing Analysis (Market Basket Analysis)
+    const rawSalesInvs = db.prepare(`
+      SELECT 
+        json_extract(data, '$.invoiceCode') as invCode,
+        json_extract(data, '$.productName') as pName,
+        json_extract(data, '$.productCode') as pCode
+      FROM raw_data r JOIN files f ON r.file_id = f.id
+      WHERE f.module_type = 'sales'
+      AND isInPeriod(json_extract(data, '$.date'), ?) = 1
+    `).all(period) as any[];
+
+    const invItems: Record<string, string[]> = {};
+    for (const item of rawSalesInvs) {
+      if (!item.invCode || (!item.pName && !item.pCode)) continue;
+      const displayName = item.pName || (pMap[item.pCode]?.name) || item.pCode;
+      if (!invItems[item.invCode]) invItems[item.invCode] = [];
+      if (!invItems[item.invCode].includes(displayName)) {
+        invItems[item.invCode].push(displayName);
+      }
+    }
+
+    const itemPairCounts: Record<string, { p1: string; p2: string; count: number }> = {};
+    for (const items of Object.values(invItems)) {
+      if (items.length < 2) continue;
+      const limited = items.slice(0, 15); // cap to avoid excessive loops
+      for (let i = 0; i < limited.length; i++) {
+        for (let j = i + 1; j < limited.length; j++) {
+          const pair = limited[i] < limited[j] ? [limited[i], limited[j]] : [limited[j], limited[i]];
+          const pKey = `${pair[0]}::${pair[1]}`;
+          if (!itemPairCounts[pKey]) {
+            itemPairCounts[pKey] = { p1: pair[0], p2: pair[1], count: 0 };
+          }
+          itemPairCounts[pKey].count += 1;
+        }
+      }
+    }
+    const basketPairs = Object.values(itemPairCounts)
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 10);
+
+    // 4. Supplier Performance & Procurement
+    const purchasesData = db.prepare(`
+      SELECT 
+        json_extract(data, '$.supplier') as supplier,
+        CAST(REPLACE(json_extract(data, '$.quantity'), ',', '') AS REAL) as qty,
+        CAST(coalesce(json_extract(data, '$.totalPrice'), json_extract(data, '$.price')) AS REAL) as price,
+        f.module_type
+      FROM raw_data r JOIN files f ON r.file_id = f.id
+      WHERE f.module_type IN ('purchases', 'purchase_returns')
+      AND isInPeriod(json_extract(data, '$.date'), ?) = 1
+    `).all(period) as any[];
+
+    const supplierMap: Record<string, { name: string; purchaseAmt: number; returnAmt: number; returnQty: number; purchaseQty: number }> = {};
+    for (const pur of purchasesData) {
+      const sup = pur.supplier || "ذینفع نامشخص";
+      if (!supplierMap[sup]) {
+        supplierMap[sup] = { name: sup, purchaseAmt: 0, returnAmt: 0, returnQty: 0, purchaseQty: 0 };
+      }
+      const q = pur.qty || 0;
+      const p = pur.price || 0;
+      const amt = q * p;
+      if (pur.module_type === "purchases") {
+        supplierMap[sup].purchaseAmt += amt;
+        supplierMap[sup].purchaseQty += q;
+      } else {
+        supplierMap[sup].returnAmt += amt;
+        supplierMap[sup].returnQty += q;
+      }
+    }
+    const supplierArr = Object.values(supplierMap).map(sup => {
+      const returnRate = sup.purchaseAmt > 0 ? (sup.returnAmt / sup.purchaseAmt) * 100 : 0;
+      return {
+        ...sup,
+        returnRate: parseFloat(returnRate.toFixed(2)),
+        netPurchase: sup.purchaseAmt - sup.returnAmt,
+      };
+    }).sort((a,b) => b.netPurchase - a.netPurchase);
+
+    // 5. Smart Stock Reconciliation (کسری و کنترل مغایرت انبار)
+    // Starting balance (Opening Stock)
+    const openingStock = db.prepare(`
+      SELECT 
+        json_extract(data, '$.productCode') as code,
+        SUM(CAST(REPLACE(json_extract(data, '$.quantity'), ',', '') AS REAL)) as qty
+      FROM raw_data r JOIN files f ON r.file_id = f.id
+      WHERE f.module_type = 'opening_inventory'
+      GROUP BY code
+    `).all() as any[];
+    const openMap: Record<string, number> = {};
+    for (const op of openingStock) {
+      if (op.code) openMap[op.code] = op.qty || 0;
+    }
+
+    // Procurement net by product
+    const prodPurch = db.prepare(`
+      SELECT 
+        json_extract(data, '$.productCode') as code,
+        SUM(CASE WHEN f.module_type = 'purchases' THEN CAST(REPLACE(json_extract(data, '$.quantity'), ',', '') AS REAL) ELSE -CAST(REPLACE(json_extract(data, '$.quantity'), ',', '') AS REAL) END) as qty,
+        SUM(CASE WHEN f.module_type = 'purchases' THEN CAST(REPLACE(json_extract(data, '$.quantity'), ',', '') AS REAL) * CAST(coalesce(json_extract(data, '$.totalPrice'), json_extract(data, '$.price')) AS REAL) ELSE 0 END) as totalAmt
+      FROM raw_data r JOIN files f ON r.file_id = f.id
+      WHERE f.module_type IN ('purchases', 'purchase_returns')
+      AND isInPeriod(json_extract(data, '$.date'), ?) = 1
+      GROUP BY code
+    `).all(period) as any[];
+    const purchMap: Record<string, { qty: number; amt: number }> = {};
+    for (const pc of prodPurch) {
+      if (pc.code) purchMap[pc.code] = { qty: pc.qty || 0, amt: pc.totalAmt || 0 };
+    }
+
+    // Sales net by product
+    const prodSales = db.prepare(`
+      SELECT 
+        json_extract(data, '$.productCode') as code,
+        json_extract(data, '$.productName') as name,
+        SUM(CASE WHEN f.module_type = 'sales' THEN CAST(REPLACE(json_extract(data, '$.quantity'), ',', '') AS REAL) ELSE -CAST(REPLACE(json_extract(data, '$.quantity'), ',', '') AS REAL) END) as qty,
+        SUM(CASE WHEN f.module_type = 'sales' THEN CAST(REPLACE(json_extract(data, '$.quantity'), ',', '') AS REAL) * CAST(coalesce(json_extract(data, '$.totalPrice'), json_extract(data, '$.price')) AS REAL) ELSE 0 END) as totalAmt
+      FROM raw_data r JOIN files f ON r.file_id = f.id
+      WHERE f.module_type IN ('sales', 'sales_returns')
+      AND isInPeriod(json_extract(data, '$.date'), ?) = 1
+      GROUP BY code
+    `).all(period) as any[];
+
+    const reconciliationList: any[] = [];
+    for (const sl of prodSales) {
+      if (!sl.code) continue;
+      const code = sl.code;
+      const name = sl.name || pMap[code]?.name || 'کالای فرضی';
+      const pInfo = pMap[code] || { mainGrp: 'سایر', subGrp: 'سایر' };
+      const openQty = openMap[code] || 0;
+      const pRec = purchMap[code] || { qty: 0, amt: 0 };
+      const sQty = sl.qty || 0;
+      const sAmt = sl.totalAmt || 0;
+
+      const expectedEnding = openQty + pRec.qty - sQty;
+      
+      // Calculate variance signal (potential stock shrink/loss)
+      let status = "تطبیق کامل";
+      if (expectedEnding < 0) {
+        status = "انحراف کسر انبار / فروش بیش از موجودی";
+      } else if (expectedEnding > 0 && sQty === 0) {
+        status = "راکد انبار";
+      } else if (sQty > 0 && expectedEnding < sQty * 0.1) {
+        status = "نیاز به شارژ بحرانی";
+      }
+
+      reconciliationList.push({
+        code,
+        name,
+        category: pInfo.mainGrp,
+        openingQty: openQty,
+        purchQty: pRec.qty,
+        salesQty: sQty,
+        salesAmt: sAmt,
+        expectedQty: expectedEnding,
+        status,
+      });
+    }
+
+    res.json({
+      weekdayArr,
+      basketPairs,
+      supplierArr,
+      reconciliationList: reconciliationList.slice(0, 50),
+    });
+  } catch (error: any) {
+    console.error("Advanced BI Report Error:", error);
+    res.status(500).json({ error: "خطا در بارگذاری گزارشات تخصصی مدیریت: " + error.message });
+  }
 });
 
 // 4. Delete File and its Data
