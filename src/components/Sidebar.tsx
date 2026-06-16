@@ -6,15 +6,17 @@ import {
   BadgeDollarSign, 
   Users,
   Calculator,
-  BarChart3
+  BarChart3,
+  X
 } from "lucide-react";
 
 interface SidebarProps {
   currentView: string;
   setCurrentView: (view: string) => void;
+  closeSidebar?: () => void;
 }
 
-export default function Sidebar({ currentView, setCurrentView }: SidebarProps) {
+export default function Sidebar({ currentView, setCurrentView, closeSidebar }: SidebarProps) {
   const menuItems = [
     { id: "dashboard", label: "داشبورد مدیریت", icon: <LayoutDashboard size={20} /> },
     { id: "files", label: "مدیریت فایل‌های اکسل", icon: <FileUp size={20} /> },
@@ -30,14 +32,21 @@ export default function Sidebar({ currentView, setCurrentView }: SidebarProps) {
   ];
 
   return (
-    <div className="w-64 bg-slate-900 text-slate-300 h-screen flex flex-col fixed pr-0 pl-0">
-      <div className="p-6 text-white text-xl font-bold border-b border-slate-800 flex items-center gap-3">
-        <div className="w-8 h-8 rounded bg-blue-600 flex items-center justify-center">
-           <TrendingUp size={18} />
+    <div className="w-full h-screen bg-slate-900 text-slate-300 flex flex-col sticky top-0 right-0 z-50 overflow-hidden">
+      <div className="p-6 text-white text-xl font-bold border-b border-slate-800 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded bg-blue-600 flex items-center justify-center">
+             <TrendingUp size={18} />
+          </div>
+          <span className="text-lg">هایپر اِکسل پرو</span>
         </div>
-        هایپر اِکسل پرو
+        {closeSidebar && (
+          <button onClick={closeSidebar} className="text-slate-400 hover:text-white transition-colors">
+            <X size={20} />
+          </button>
+        )}
       </div>
-      <nav className="flex-1 py-4 flex flex-col gap-1 px-3">
+      <nav className="flex-1 py-4 flex flex-col gap-1 px-3 overflow-y-auto">
         {menuItems.map((item) => (
           <button
             key={item.id}

@@ -169,7 +169,7 @@ export default function DashboardView() {
                 />
                 <XAxis
                   dataKey="name"
-                  angle={-90} textAnchor="start" height={160} tickFormatter={(v) => v && String(v).length > 25 ? String(v).substring(0, 25) + "..." : v} tick={{fontSize: 12, fontWeight: "bold", dy: 10, fill: "#475569"}} interval={0}
+                  angle={-90} textAnchor="end" height={160} tickFormatter={(v) => v && String(v).length > 25 ? String(v).substring(0, 25) + "..." : v} tick={{fontSize: 12, fontWeight: "bold", dy: 15, dx: -10, fill: "#475569"}} interval={0}
                   axisLine={false}
                   tickLine={false}
                 />

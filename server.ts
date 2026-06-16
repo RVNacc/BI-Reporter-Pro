@@ -221,6 +221,10 @@ app.post("/api/upload-commit", (req, res) => {
         for (const [sysKey, exKey] of Object.entries(mappings)) {
           if (exKey && row[exKey as string] !== undefined && row[exKey as string] !== null) {
             let val = String(row[exKey as string]).trim();
+            // Convert Persian/Arabic numerals to English
+            val = val.replace(/[۰-۹]/g, d => '0123456789'['۰۱۲۳۴۵۶۷۸۹'.indexOf(d)]);
+            val = val.replace(/[٠-٩]/g, d => '0123456789'['٠١٢٣٤٥٦٧٨٩'.indexOf(d)]);
+            
             if (['quantity', 'price', 'totalPrice', 'costPrice', 'lastPurchasePrice', 'amount', 'vatAmount', 'discount', 'openingBalance', 'volume'].includes(sysKey)) {
                 val = val.replace(/,/g, '');
             }
@@ -331,7 +335,7 @@ app.get("/api/dashboard", (req, res) => {
         `
       SELECT 
         SUBSTR(json_extract(data, '$.date'), 1, 7) as monthStr,
-        SUM(CAST(json_extract(data, '$.quantity') AS REAL) * CAST(coalesce(json_extract(data, '$.totalPrice'), json_extract(data, '$.price'), '0') AS REAL) * CASE WHEN f.module_type = 'sales_returns' THEN -1 ELSE 1 END) as amount
+        SUM(coalesce(CAST(json_extract(data, '$.totalPrice') AS REAL), CAST(REPLACE(json_extract(data, '$.quantity'), ',', '') AS REAL) * CAST(json_extract(data, '$.price') AS REAL)) * CASE WHEN f.module_type = 'sales_returns' THEN -1 ELSE 1 END) as amount
       FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type IN ('sales', 'sales_returns')
       AND isInPeriod(json_extract(data, '$.date'), ?) = 1
       GROUP BY SUBSTR(json_extract(data, '$.date'), 1, 7)
@@ -356,7 +360,7 @@ app.get("/api/dashboard", (req, res) => {
         `
       SELECT 
         coalesce(json_extract(data, '$.productName'), json_extract(data, '$.productCode'), 'نامشخص') as pName,
-        SUM(CAST(json_extract(data, '$.quantity') AS REAL) * CAST(coalesce(json_extract(data, '$.totalPrice'), json_extract(data, '$.price'), '0') AS REAL) * CASE WHEN f.module_type = 'sales_returns' THEN -1 ELSE 1 END) as amount
+        SUM(coalesce(CAST(json_extract(data, '$.totalPrice') AS REAL), CAST(REPLACE(json_extract(data, '$.quantity'), ',', '') AS REAL) * CAST(json_extract(data, '$.price') AS REAL)) * CASE WHEN f.module_type = 'sales_returns' THEN -1 ELSE 1 END) as amount
       FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type IN ('sales', 'sales_returns')
       AND isInPeriod(json_extract(data, '$.date'), ?) = 1
       GROUP BY coalesce(json_extract(data, '$.productName'), json_extract(data, '$.productCode'), 'نامشخص')
@@ -412,11 +416,11 @@ app.get("/api/dashboard", (req, res) => {
     let profit = (finAgg?.income || 0) - (finAgg?.outcome || 0);
 
     // Get Top / Bottom selling products and categories for extra cards
-    const topProd = db.prepare(`SELECT coalesce(json_extract(data, '$.productName'), json_extract(data, '$.productCode'), 'نامشخص') as name, SUM(CAST(json_extract(data, '$.quantity') AS REAL) * CAST(coalesce(json_extract(data, '$.totalPrice'), json_extract(data, '$.price'), '0') AS REAL) * CASE WHEN f.module_type = 'sales_returns' THEN -1 ELSE 1 END) as amt FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type IN ('sales', 'sales_returns') AND isInPeriod(json_extract(data, '$.date'), ?) = 1 GROUP BY name ORDER BY amt DESC LIMIT 1`).get(period) as any;
+    const topProd = db.prepare(`SELECT coalesce(json_extract(data, '$.productName'), json_extract(data, '$.productCode'), 'نامشخص') as name, SUM(coalesce(CAST(json_extract(data, '$.totalPrice') AS REAL), CAST(REPLACE(json_extract(data, '$.quantity'), ',', '') AS REAL) * CAST(json_extract(data, '$.price') AS REAL)) * CASE WHEN f.module_type = 'sales_returns' THEN -1 ELSE 1 END) as amt FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type IN ('sales', 'sales_returns') AND isInPeriod(json_extract(data, '$.date'), ?) = 1 GROUP BY name ORDER BY amt DESC LIMIT 1`).get(period) as any;
     
-    const botProd = db.prepare(`SELECT coalesce(json_extract(data, '$.productName'), json_extract(data, '$.productCode'), 'نامشخص') as name, SUM(CAST(json_extract(data, '$.quantity') AS REAL) * CAST(coalesce(json_extract(data, '$.totalPrice'), json_extract(data, '$.price'), '0') AS REAL) * CASE WHEN f.module_type = 'sales_returns' THEN -1 ELSE 1 END) as amt FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type IN ('sales', 'sales_returns') AND isInPeriod(json_extract(data, '$.date'), ?) = 1 GROUP BY name HAVING amt > 0 ORDER BY amt ASC LIMIT 1`).get(period) as any;
+    const botProd = db.prepare(`SELECT coalesce(json_extract(data, '$.productName'), json_extract(data, '$.productCode'), 'نامشخص') as name, SUM(coalesce(CAST(json_extract(data, '$.totalPrice') AS REAL), CAST(REPLACE(json_extract(data, '$.quantity'), ',', '') AS REAL) * CAST(json_extract(data, '$.price') AS REAL)) * CASE WHEN f.module_type = 'sales_returns' THEN -1 ELSE 1 END) as amt FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type IN ('sales', 'sales_returns') AND isInPeriod(json_extract(data, '$.date'), ?) = 1 GROUP BY name HAVING amt > 0 ORDER BY amt ASC LIMIT 1`).get(period) as any;
 
-    const topDate = db.prepare(`SELECT json_extract(data, '$.date') as date, SUM(CAST(json_extract(data, '$.quantity') AS REAL) * CAST(coalesce(json_extract(data, '$.totalPrice'), json_extract(data, '$.price'), '0') AS REAL) * CASE WHEN f.module_type = 'sales_returns' THEN -1 ELSE 1 END) as amt FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type IN ('sales', 'sales_returns') AND isInPeriod(json_extract(data, '$.date'), ?) = 1 GROUP BY date ORDER BY amt DESC LIMIT 1`).get(period) as any;
+    const topDate = db.prepare(`SELECT json_extract(data, '$.date') as date, SUM(coalesce(CAST(json_extract(data, '$.totalPrice') AS REAL), CAST(REPLACE(json_extract(data, '$.quantity'), ',', '') AS REAL) * CAST(json_extract(data, '$.price') AS REAL)) * CASE WHEN f.module_type = 'sales_returns' THEN -1 ELSE 1 END) as amt FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type IN ('sales', 'sales_returns') AND isInPeriod(json_extract(data, '$.date'), ?) = 1 GROUP BY date ORDER BY amt DESC LIMIT 1`).get(period) as any;
 
     res.json({
       kpis: {
@@ -606,7 +610,7 @@ app.get("/api/reports/cost-allocation", (req, res) => {
       SELECT 
        json_extract(data, '$.productCode') as code,
        CAST(REPLACE(json_extract(data, '$.quantity'), ',', '') AS REAL) as qty,
-       CAST(coalesce(json_extract(data, '$.totalPrice'), json_extract(data, '$.price')) AS REAL) as price,
+       CAST(json_extract(data, '$.price') AS REAL) as price, CAST(json_extract(data, '$.totalPrice') AS REAL) as totalPrice,
        json_extract(data, '$.invoiceCode') as invCode,
        json_extract(data, '$.receiptCode') as recCode,
        SUBSTR(coalesce(json_extract(data, '$.time'), '12:00'), 1, 2) as hour,
@@ -882,7 +886,7 @@ app.get("/api/reports/pareto", (req, res) => {
     }
 
     // 2. Get Sales data including returns
-    const sales = db.prepare("SELECT json_extract(data, '$.productCode') as code, json_extract(data, '$.productName') as name, CAST(REPLACE(json_extract(data, '$.quantity'), ',', '') AS REAL) as qty, CAST(coalesce(json_extract(data, '$.totalPrice'), json_extract(data, '$.price')) AS REAL) as price, json_extract(data, '$.invoiceCode') as invCode, json_extract(data, '$.date') as date, f.module_type FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type IN ('sales', 'sales_returns') AND isInPeriod(json_extract(data, '$.date'), ?) = 1").iterate(period);
+    const sales = db.prepare("SELECT json_extract(data, '$.productCode') as code, json_extract(data, '$.productName') as name, CAST(REPLACE(json_extract(data, '$.quantity'), ',', '') AS REAL) as qty, CAST(json_extract(data, '$.price') AS REAL) as price, CAST(json_extract(data, '$.totalPrice') AS REAL) as totalPrice, json_extract(data, '$.invoiceCode') as invCode, json_extract(data, '$.date') as date, f.module_type FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type IN ('sales', 'sales_returns') AND isInPeriod(json_extract(data, '$.date'), ?) = 1").iterate(period);
 
     // Dictionaries for aggregation
     const productStats: Record<string, { qty: number, amt: number, code: string, name: string, l1: string, l2: string, invoices: Set<string> }> = {};
@@ -897,8 +901,12 @@ app.get("/api/reports/pareto", (req, res) => {
        const isReturn = row.module_type === 'sales_returns';
        const mult = isReturn ? -1 : 1;
        const q = (row.qty || 0) * mult;
-       const p = row.price || 0;
-       const amt = q * p;
+       let amt = 0;
+       if (row.totalPrice !== null && row.totalPrice !== undefined && !Number.isNaN(row.totalPrice)) {
+          amt = row.totalPrice * mult;
+       } else {
+          amt = q * (row.price || 0);
+       }
        const code = row.code || 'unknown';
        let pInfo = pMap[code] || { name: row.name || code, mainGrp: 'سایر', subGrp: 'سایر' };
        const l1 = pInfo.mainGrp;
@@ -1079,7 +1087,7 @@ app.get("/api/reports/weekly", (req, res) => {
     }
 
     // 2. Get Sales data
-    const sales = db.prepare("SELECT json_extract(data, '$.productCode') as code, CAST(REPLACE(json_extract(data, '$.quantity'), ',', '') AS REAL) as qty, CAST(coalesce(json_extract(data, '$.totalPrice'), json_extract(data, '$.price')) AS REAL) as price, json_extract(data, '$.date') as date, f.module_type FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type IN ('sales', 'sales_returns') AND isInPeriod(json_extract(data, '$.date'), ?) = 1").iterate(period);
+    const sales = db.prepare("SELECT json_extract(data, '$.productCode') as code, CAST(REPLACE(json_extract(data, '$.quantity'), ',', '') AS REAL) as qty, CAST(json_extract(data, '$.price') AS REAL) as price, CAST(json_extract(data, '$.totalPrice') AS REAL) as totalPrice, json_extract(data, '$.date') as date, f.module_type FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type IN ('sales', 'sales_returns') AND isInPeriod(json_extract(data, '$.date'), ?) = 1").iterate(period);
     
     const salesRows: any[] = [];
     let minJDN = Infinity;
@@ -1113,12 +1121,19 @@ app.get("/api/reports/weekly", (req, res) => {
     }
 
     const aggregated: Record<string, { l1: string, l2: string, ac: string, weeksAmt: Record<number, number>, weeksQty: Record<number, number> }> = {};
+    const prodAgg: Record<string, { name: string, code: string, weeksAmt: Record<number, number>, weeksQty: Record<number, number> }> = {};
 
     for (const row of salesRows) {
         const isReturn = row.module_type === 'sales_returns';
         const mult = isReturn ? -1 : 1;
         const qty = (row.qty || 0) * mult;
-        const amt = qty * (row.price || 0);
+        
+        let amt = 0;
+        if (row.totalPrice !== null && row.totalPrice !== undefined && !Number.isNaN(row.totalPrice)) {
+            amt = row.totalPrice * mult;
+        } else {
+            amt = qty * (row.price || 0);
+        }
 
         const code = row.code || 'unknown';
         const pInfo = pMap[code] || { name: 'نامشخص', l1: 'سایر', l2: 'سایر', ac: 'سایر' };
@@ -1129,6 +1144,12 @@ app.get("/api/reports/weekly", (req, res) => {
         }
         aggregated[key].weeksAmt[row.week] = (aggregated[key].weeksAmt[row.week] || 0) + amt;
         aggregated[key].weeksQty[row.week] = (aggregated[key].weeksQty[row.week] || 0) + qty;
+        
+        if (!prodAgg[code]) {
+            prodAgg[code] = { name: pInfo.name, code, weeksAmt: {}, weeksQty: {} };
+        }
+        prodAgg[code].weeksAmt[row.week] = (prodAgg[code].weeksAmt[row.week] || 0) + amt;
+        prodAgg[code].weeksQty[row.week] = (prodAgg[code].weeksQty[row.week] || 0) + qty;
     }
 
     const weeksHeaders = Array.from({length: maxWeek}, (_, i) => i + 1);
@@ -1154,7 +1175,34 @@ app.get("/api/reports/weekly", (req, res) => {
         return { l1: agg.l1, l2: agg.l2, ac: agg.ac, wAmt, wQty };
     });
 
-    res.json({ weeks: weeksHeaders.reverse(), rows: resultRows.sort((a,b) => (a.l1 || "").localeCompare(b.l1 || "") || (a.l2 || "").localeCompare(b.l2 || "")) });
+
+    const movers: any[] = [];
+    if (maxWeek > 1) {
+       for (const code in prodAgg) {
+          const p = prodAgg[code];
+          const curAmt = p.weeksAmt[maxWeek] || 0;
+          const prevAmt = p.weeksAmt[maxWeek - 1] || 0;
+          const diffAmt = curAmt - prevAmt;
+          
+          const curQty = p.weeksQty[maxWeek] || 0;
+          const prevQty = p.weeksQty[maxWeek - 1] || 0;
+          const diffQty = curQty - prevQty;
+          
+          if (diffAmt !== 0 || diffQty !== 0) {
+             movers.push({ name: p.name, code: p.code, diffAmt, curAmt, prevAmt, diffQty, curQty, prevQty });
+          }
+       }
+    }
+    const topGrowersAmt = [...movers].sort((a,b) => b.diffAmt - a.diffAmt).slice(0, 50);
+    const topDeclinersAmt = [...movers].sort((a,b) => a.diffAmt - b.diffAmt).slice(0, 50);
+    const topGrowersQty = [...movers].sort((a,b) => b.diffQty - a.diffQty).slice(0, 50);
+    const topDeclinersQty = [...movers].sort((a,b) => a.diffQty - b.diffQty).slice(0, 50);
+
+    res.json({ 
+       weeks: weeksHeaders, 
+       rows: resultRows.sort((a,b) => (a.l1 || "").localeCompare(b.l1 || "") || (a.l2 || "").localeCompare(b.l2 || "")),
+       movers: { topGrowersAmt, topDeclinersAmt, topGrowersQty, topDeclinersQty }
+    });
   } catch(e) {
     console.error(e);
     res.status(500).json({error: "Failed to generate weekly report"});
@@ -1173,9 +1221,9 @@ app.get("/api/reports/sales", (req, res) => {
        if (row.code) pMap[row.code] = { name: row.name || 'نامشخص', mainGrp: row.mainGrp || 'نامشخص', subGrp: row.subGrp || 'نامشخص' };
     }
 
-    const sales = db.prepare("SELECT json_extract(data, '$.productCode') as code, json_extract(data, '$.productName') as name, CAST(REPLACE(json_extract(data, '$.quantity'), ',', '') AS REAL) as qty, CAST(coalesce(json_extract(data, '$.totalPrice'), json_extract(data, '$.price')) AS REAL) as price, SUBSTR(coalesce(json_extract(data, '$.time'), '12:00'), 1, 2) as hour, f.module_type FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type IN ('sales', 'sales_returns') AND isInPeriod(json_extract(data, '$.date'), ?) = 1").iterate(period);
+    const sales = db.prepare("SELECT json_extract(data, '$.productCode') as code, json_extract(data, '$.productName') as name, CAST(REPLACE(json_extract(data, '$.quantity'), ',', '') AS REAL) as qty, CAST(json_extract(data, '$.price') AS REAL) as price, CAST(json_extract(data, '$.totalPrice') AS REAL) as totalPrice, SUBSTR(coalesce(json_extract(data, '$.time'), '12:00'), 1, 2) as hour, f.module_type FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type IN ('sales', 'sales_returns') AND isInPeriod(json_extract(data, '$.date'), ?) = 1").iterate(period);
 
-    const purchases = db.prepare("SELECT json_extract(data, '$.productCode') as code, CAST(REPLACE(json_extract(data, '$.quantity'), ',', '') AS REAL) as qty, CAST(coalesce(json_extract(data, '$.totalPrice'), json_extract(data, '$.price')) AS REAL) as price, f.module_type FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type IN ('purchases', 'purchase_returns') AND isInPeriod(json_extract(data, '$.date'), ?) = 1").iterate(period);
+    const purchases = db.prepare("SELECT json_extract(data, '$.productCode') as code, CAST(REPLACE(json_extract(data, '$.quantity'), ',', '') AS REAL) as qty, CAST(json_extract(data, '$.price') AS REAL) as price, CAST(json_extract(data, '$.totalPrice') AS REAL) as totalPrice, f.module_type FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type IN ('purchases', 'purchase_returns') AND isInPeriod(json_extract(data, '$.date'), ?) = 1").iterate(period);
 
     let totalVolume = 0;
     let totalQty = 0;
@@ -1198,8 +1246,12 @@ app.get("/api/reports/sales", (req, res) => {
        if (!catLevel2Stats[l2]) catLevel2Stats[l2] = { name: l2, ...initStats() };
 
        const q = row.qty || 0;
-       const p = row.price || 0;
-       const amt = q * p;
+       let amt = 0;
+       if (row.totalPrice !== null && row.totalPrice !== undefined && !Number.isNaN(row.totalPrice)) {
+           amt = row.totalPrice;
+       } else {
+           amt = q * (row.price || 0);
+       }
 
        if (row.module_type === 'sales') {
           totalQty += q; totalVolume += amt;
@@ -1242,8 +1294,12 @@ app.get("/api/reports/sales", (req, res) => {
        if (!catLevel2Stats[l2]) catLevel2Stats[l2] = { name: l2, ...initStats() };
 
        const q = row.qty || 0;
-       const p = row.price || 0;
-       const amt = q * p;
+       let amt = 0;
+       if (row.totalPrice !== null && row.totalPrice !== undefined && !Number.isNaN(row.totalPrice)) {
+           amt = row.totalPrice;
+       } else {
+           amt = q * (row.price || 0);
+       }
 
        if (row.module_type === 'purchases') {
           productStats[code].purchQty += q; productStats[code].purchAmt += amt;
@@ -1348,7 +1404,7 @@ app.get("/api/reports/inventory", (req, res) => {
        if (row.code) pMap[row.code] = { name: row.name || 'نامشخص', mainGrp: row.mainGrp || 'نامشخص', subGrp: row.subGrp || 'نامشخص' };
     }
 
-    const purchReturns = db.prepare("SELECT json_extract(data, '$.productCode') as code, json_extract(data, '$.productName') as name, CAST(REPLACE(json_extract(data, '$.quantity'), ',', '') AS REAL) as qty, CAST(coalesce(json_extract(data, '$.totalPrice'), json_extract(data, '$.price')) AS REAL) as price FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type = 'purchase_returns' AND isInPeriod(json_extract(data, '$.date'), ?) = 1").iterate(period);
+    const purchReturns = db.prepare("SELECT json_extract(data, '$.productCode') as code, json_extract(data, '$.productName') as name, CAST(REPLACE(json_extract(data, '$.quantity'), ',', '') AS REAL) as qty, CAST(json_extract(data, '$.price') AS REAL) as price, CAST(json_extract(data, '$.totalPrice') AS REAL) as totalPrice FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type = 'purchase_returns' AND isInPeriod(json_extract(data, '$.date'), ?) = 1").iterate(period);
 
     const retL1: Record<string, any> = {};
     const retL2: Record<string, any> = {};
@@ -1368,7 +1424,7 @@ app.get("/api/reports/inventory", (req, res) => {
        if (!retProducts[code]) retProducts[code] = {name: pInfo.name, ...initD()};
 
        const q = row.qty || 0;
-       const amt = q * (row.price || 0);
+       let amt = 0; if (row.totalPrice != null && !Number.isNaN(row.totalPrice)) { amt = row.totalPrice; } else { amt = q * (row.price || 0); }
 
        retL1[l1].qty += q; retL1[l1].amt += amt;
        retL2[l2].qty += q; retL2[l2].amt += amt;
@@ -1619,7 +1675,7 @@ app.get("/api/reports/hr", (req, res) => {
       json_extract(data, '$.date') as date,
       json_extract(data, '$.time') as time,
       CAST(REPLACE(json_extract(data, '$.quantity'), ',', '') AS REAL) as qty,
-      CAST(coalesce(json_extract(data, '$.totalPrice'), json_extract(data, '$.price')) AS REAL) as price,
+      CAST(json_extract(data, '$.price') AS REAL) as price, CAST(json_extract(data, '$.totalPrice') AS REAL) as totalPrice,
       json_extract(data, '$.invoiceCode') as invCode
     FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type = 'sales'
     AND isInPeriod(json_extract(data, '$.date'), ?) = 1
@@ -1872,7 +1928,7 @@ app.get("/api/reports/advanced-bi", (req, res) => {
       SELECT 
         json_extract(data, '$.date') as date,
         CAST(REPLACE(json_extract(data, '$.quantity'), ',', '') AS REAL) as qty,
-        CAST(coalesce(json_extract(data, '$.totalPrice'), json_extract(data, '$.price')) AS REAL) as price,
+        CAST(json_extract(data, '$.price') AS REAL) as price, CAST(json_extract(data, '$.totalPrice') AS REAL) as totalPrice,
         f.module_type
       FROM raw_data r JOIN files f ON r.file_id = f.id
       WHERE f.module_type IN ('sales', 'sales_returns')
@@ -1912,7 +1968,7 @@ app.get("/api/reports/advanced-bi", (req, res) => {
       const isReturn = s.module_type === "sales_returns";
       const q = s.qty || 0;
       const p = s.price || 0;
-      const amt = q * p * (isReturn ? -1 : 1);
+      let amtBase = 0; if (s.totalPrice != null && !Number.isNaN(s.totalPrice)) { amtBase = s.totalPrice; } else { amtBase = q * p; } const amt = amtBase * (isReturn ? -1 : 1);
 
       if (weekdayMap[day]) {
         weekdayMap[day].salesAmt += amt;
@@ -1968,7 +2024,7 @@ app.get("/api/reports/advanced-bi", (req, res) => {
       SELECT 
         json_extract(data, '$.supplier') as supplier,
         CAST(REPLACE(json_extract(data, '$.quantity'), ',', '') AS REAL) as qty,
-        CAST(coalesce(json_extract(data, '$.totalPrice'), json_extract(data, '$.price')) AS REAL) as price,
+        CAST(json_extract(data, '$.price') AS REAL) as price, CAST(json_extract(data, '$.totalPrice') AS REAL) as totalPrice,
         f.module_type
       FROM raw_data r JOIN files f ON r.file_id = f.id
       WHERE f.module_type IN ('purchases', 'purchase_returns')
@@ -1982,8 +2038,12 @@ app.get("/api/reports/advanced-bi", (req, res) => {
         supplierMap[sup] = { name: sup, purchaseAmt: 0, returnAmt: 0, returnQty: 0, purchaseQty: 0 };
       }
       const q = pur.qty || 0;
-      const p = pur.price || 0;
-      const amt = q * p;
+      let amt = 0;
+      if (pur.totalPrice !== null && pur.totalPrice !== undefined && !Number.isNaN(pur.totalPrice)) {
+          amt = pur.totalPrice;
+      } else {
+          amt = q * (pur.price || 0);
+      }
       if (pur.module_type === "purchases") {
         supplierMap[sup].purchaseAmt += amt;
         supplierMap[sup].purchaseQty += q;
@@ -2021,7 +2081,7 @@ app.get("/api/reports/advanced-bi", (req, res) => {
       SELECT 
         json_extract(data, '$.productCode') as code,
         SUM(CASE WHEN f.module_type = 'purchases' THEN CAST(REPLACE(json_extract(data, '$.quantity'), ',', '') AS REAL) ELSE -CAST(REPLACE(json_extract(data, '$.quantity'), ',', '') AS REAL) END) as qty,
-        SUM(CASE WHEN f.module_type = 'purchases' THEN CAST(REPLACE(json_extract(data, '$.quantity'), ',', '') AS REAL) * CAST(coalesce(json_extract(data, '$.totalPrice'), json_extract(data, '$.price')) AS REAL) ELSE 0 END) as totalAmt
+        SUM(CASE WHEN f.module_type = 'purchases' THEN coalesce(CAST(json_extract(data, '$.totalPrice') AS REAL), CAST(REPLACE(json_extract(data, '$.quantity'), ',', '') AS REAL) * CAST(json_extract(data, '$.price') AS REAL)) ELSE 0 END) as totalAmt
       FROM raw_data r JOIN files f ON r.file_id = f.id
       WHERE f.module_type IN ('purchases', 'purchase_returns')
       AND isInPeriod(json_extract(data, '$.date'), ?) = 1
@@ -2038,7 +2098,7 @@ app.get("/api/reports/advanced-bi", (req, res) => {
         json_extract(data, '$.productCode') as code,
         json_extract(data, '$.productName') as name,
         SUM(CASE WHEN f.module_type = 'sales' THEN CAST(REPLACE(json_extract(data, '$.quantity'), ',', '') AS REAL) ELSE -CAST(REPLACE(json_extract(data, '$.quantity'), ',', '') AS REAL) END) as qty,
-        SUM(CASE WHEN f.module_type = 'sales' THEN CAST(REPLACE(json_extract(data, '$.quantity'), ',', '') AS REAL) * CAST(coalesce(json_extract(data, '$.totalPrice'), json_extract(data, '$.price')) AS REAL) ELSE 0 END) as totalAmt
+        SUM(CASE WHEN f.module_type = 'sales' THEN coalesce(CAST(json_extract(data, '$.totalPrice') AS REAL), CAST(REPLACE(json_extract(data, '$.quantity'), ',', '') AS REAL) * CAST(json_extract(data, '$.price') AS REAL)) ELSE 0 END) as totalAmt
       FROM raw_data r JOIN files f ON r.file_id = f.id
       WHERE f.module_type IN ('sales', 'sales_returns')
       AND isInPeriod(json_extract(data, '$.date'), ?) = 1

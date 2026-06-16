@@ -44,6 +44,89 @@ export default function ParetoReportsView() {
     fetchData();
   }, [period]);
 
+  const renderTopBottomLists = (items: any[], valueKey: string, title: string, formatVal: (v:any)=>string) => {
+     if (!items || items.length === 0) return null;
+     const sorted = [...items].sort((a,b) => b[valueKey] - a[valueKey]);
+     const top10 = sorted.slice(0, 10);
+     const bottom10 = [...sorted].sort((a,b) => a[valueKey] - b[valueKey]).slice(0, 10);
+
+     return (
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden mt-6">
+           <div className="p-4 border-b border-slate-200 bg-slate-50 flex items-center gap-2">
+              <Layers size={18} className="text-blue-600" />
+              <h3 className="font-semibold text-slate-800">{title}</h3>
+           </div>
+           <div className="grid grid-cols-1 md:grid-cols-2">
+              {/* Right panel (Top 10) in RTL */}
+              <div className="p-4 border-l border-slate-100">
+                 <h4 className="font-bold text-green-700 text-sm mb-4 border-b pb-2 flex items-center gap-2"><TrendingUp size={16}/> برترین‌ها (TOP 10)</h4>
+                 <ul className="space-y-2">
+                    {top10.map((item, idx) => (
+                       <li key={idx} className="flex justify-between items-center text-sm p-2 hover:bg-slate-50 rounded">
+                          <span className="flex items-center gap-2 text-slate-700"><span className="w-5 text-center font-bold text-slate-400">{idx+1}.</span> {item.name}</span>
+                          <span className="font-medium text-slate-900">{formatVal(item[valueKey])}</span>
+                       </li>
+                    ))}
+                 </ul>
+              </div>
+              {/* Left panel (Bottom 10) in RTL */}
+              <div className="p-4">
+                 <h4 className="font-bold text-red-700 text-sm mb-4 border-b pb-2 flex items-center gap-2"><TrendingDown size={16}/> ضعیف‌ترین‌ها (BOTTOM 10)</h4>
+                 <ul className="space-y-2">
+                    {bottom10.map((item, idx) => (
+                       <li key={idx} className="flex justify-between items-center text-sm p-2 hover:bg-slate-50 rounded">
+                          <span className="flex items-center gap-2 text-slate-700"><span className="w-5 text-center font-bold text-slate-400">{idx+1}.</span> {item.name}</span>
+                          <span className="font-medium text-slate-900">{formatVal(item[valueKey])}</span>
+                       </li>
+                    ))}
+                 </ul>
+              </div>
+           </div>
+        </div>
+     );
+  };
+
+  const renderClassATable = (items: any[], valueKey: string, title: string, formatVal: (v:any)=>string) => {
+     if (!items || items.length === 0) return null;
+     const classA = items.filter(i => i.cumPercent <= 80);
+     
+     return (
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden mt-6">
+           <div className="p-4 border-b border-slate-200 bg-slate-50 flex items-center gap-2">
+              <BarChart3 size={18} className="text-purple-600" />
+              <h3 className="font-semibold text-slate-800">{title} (کلاس A - 80٪ {title.includes('ریالی') ? 'درآمد' : 'حجم'} کل)</h3>
+           </div>
+           <div className="p-4 bg-purple-50 text-purple-800 text-sm border-b border-purple-100">
+               این بخش شامل لیست کالاهایی است که مجموعا ۸۰٪ از {title.includes('ریالی') ? 'فروش ریالی' : 'حجم فروش'} را تشکیل می‌دهند (۲۰٪ برتر کالاها).
+               تعداد کل کالاهای کلاس A: <span className="font-bold">{classA.length}</span> مورد.
+           </div>
+           <div className="overflow-x-auto max-h-[400px]">
+              <table className="w-full text-sm text-right">
+                 <thead className="bg-slate-50 sticky top-0 shadow-sm text-slate-600">
+                    <tr>
+                       <th className="px-4 py-3 font-medium">ردیف</th>
+                       <th className="px-4 py-3 font-medium">نام کالا</th>
+                       <th className="px-4 py-3 font-medium">مقدار</th>
+                       <th className="px-4 py-3 font-medium text-center">سهم از کل / تجمعی</th>
+                    </tr>
+                 </thead>
+                 <tbody className="divide-y divide-slate-100">
+                    {classA.map((item, idx) => (
+                       <tr key={idx} className="hover:bg-slate-50">
+                          <td className="px-4 py-3 text-slate-500 w-16 text-center">{idx + 1}</td>
+                          <td className="px-4 py-3 font-medium text-slate-800">{item.name}</td>
+                          <td className="px-4 py-3 text-slate-700 font-mono">{formatVal(item[valueKey])}</td>
+                          <td className="px-4 py-3 text-slate-600 text-center">
+                             {item.cumPercent?.toFixed(1)}%
+                          </td>
+                       </tr>
+                    ))}
+                 </tbody>
+              </table>
+           </div>
+        </div>
+     );
+  };
   const renderParetoChart = (chartData: any[], valueKey: string, nameKey: string, title: string) => {
      if (!chartData || chartData.length === 0) return null;
      const topN = chartData.slice(0, 30); // show top 30 in chart
@@ -56,7 +139,7 @@ export default function ParetoReportsView() {
 <ResponsiveContainer width="100%" height="100%">
 <ComposedChart data={topN} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
                     <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
-                    <XAxis dataKey={nameKey} angle={-90} textAnchor="start" height={180} tickFormatter={(v) => v && v.length > 30 ? v.substring(0, 30) + '...' : v} tick={{fontSize: 12, fontWeight: 'bold', dy: 10, fill: '#1e293b'}} interval={0} />
+                    <XAxis dataKey={nameKey} angle={-90} textAnchor="end" height={180} tickFormatter={(v) => v && v.length > 30 ? v.substring(0, 30) + '...' : v} tick={{fontSize: 12, fontWeight: 'bold', dy: 15, dx: -10, fill: '#1e293b'}} interval={0} />
                     <YAxis yAxisId="left" {...defaultYAxisProps} orientation="left" />
                     <YAxis yAxisId="right" {...defaultYAxisProps} />
                     <Tooltip formatter={(val: number, name: string) => [name === 'درصد تجمعی' ? val.toFixed(2) + '%' : val.toLocaleString(), name]} />
@@ -172,8 +255,16 @@ export default function ParetoReportsView() {
              {renderParetoChart(data?.paretoProdAmt, 'amt', 'name', 'پارتو محصولات (ریالی)')}
              {renderParetoChart(data?.paretoProdQty, 'qty', 'name', 'پارتو محصولات (تعدادی)')}
           </div>
-
+          
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+             {renderClassATable(data?.paretoProdAmt, 'amt', 'پارتو محصولات ریالی', (v) => Number(v || 0).toLocaleString() + ' ریال')}
+             {renderClassATable(data?.paretoProdQty, 'qty', 'پارتو محصولات تعدادی', (v) => Number(v || 0).toLocaleString())}
+          </div>
+          
+          {renderTopBottomLists(data?.paretoProdAmt, 'amt', 'پرفروش‌ترین و کم‌فروش‌ترین محصولات (ریالی)', (v) => Number(v || 0).toLocaleString() + ' ریال')}
+          {renderTopBottomLists(data?.paretoProdQty, 'qty', 'پُرحجم‌ترین و کم‌حجم‌ترین محصولات (تعدادی)', (v) => Number(v || 0).toLocaleString())}
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
              {renderParetoChart(data?.l1Arr, 'amt', 'name', 'پارتو سطح ۱ (ریالی)')}
              {renderParetoChart(data?.l2Arr, 'amt', 'name', 'پارتو سطح ۲ (ریالی)')}
           </div>

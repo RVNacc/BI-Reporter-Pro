@@ -20,7 +20,6 @@ import ExportPrintButtons from "../components/ExportPrintButtons";
 import { defaultXAxisProps, defaultYAxisProps, verticalYAxisProps, hideAxisProps } from "../components/charts/ChartConfig";
 import {
   ResponsiveContainer,
-  ResponsiveContainer,
   ComposedChart,
   Bar,
   Line,

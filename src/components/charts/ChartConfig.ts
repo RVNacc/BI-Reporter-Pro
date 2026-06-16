@@ -1,11 +1,11 @@
 export const defaultXAxisProps = {
   angle: -90,
   textAnchor: "end",
-  height: 160,
+  height: 180,
   interval: 0,
-  axisLine: false,
-  tickLine: false,
-  tick: { fontSize: 12, fontWeight: "bold", dy: 5, dx: -5, fill: "#475569" },
+  axisLine: true,
+  tickLine: true,
+  tick: { fontSize: 13, fontWeight: "bold", dy: 15, dx: -8, fill: "#475569" },
 };
 
 export const defaultYAxisProps = {

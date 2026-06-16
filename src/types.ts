@@ -45,7 +45,8 @@ export const MODULES: Record<string, ModuleConfig> = {
       { key: "productCode", label: "کد کالا", required: true },
       { key: "productName", label: "نام کالا", required: false },
       { key: "quantity", label: "تعداد فروش", required: true },
-      { key: "price", label: "نرخ فروش", required: true },
+      { key: "price", label: "نرخ فروش (واحد)", required: false },
+      { key: "totalPrice", label: "مبلغ کل فروش", required: false },
       { key: "vatAmount", label: "ارزش افزوده ردیف", required: false },
       { key: "lastPurchasePrice", label: "آخرین نرخ خرید", required: false },
       { key: "costPrice", label: "بهای تمام شده", required: false }

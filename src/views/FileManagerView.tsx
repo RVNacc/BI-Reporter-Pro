@@ -170,7 +170,7 @@ export default function FileManagerView() {
               <div className="border-2 border-dashed border-slate-300 rounded-xl p-8 flex flex-col items-center justify-center bg-slate-50 relative hover:bg-slate-100 transition duration-200 cursor-pointer">
                 <input
                   type="file"
-                  accept=".xlsx, .xls"
+                  accept=".xlsx, .xls, .csv"
                   className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
                   onChange={handleFileUpload}
                   disabled={isUploading}
@@ -189,7 +189,7 @@ export default function FileManagerView() {
                     : "کلیک کنید یا فایل را بکشید"}
                 </p>
                 <p className="text-xs text-slate-500">
-                  فقط فرمت‌های اکسل (.xlsx)
+                  فرمت‌های پشتیبانی شده: اکسل (.xlsx, .xls) و CSV (.csv)
                 </p>
               </div>
             </>

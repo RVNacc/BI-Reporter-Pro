@@ -151,7 +151,7 @@ export default function SalesReportsView() {
 <ResponsiveContainer width="100%" height="100%">
 <LineChart data={data.basketL1} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
                            <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                           <XAxis dataKey="name" angle={-90} textAnchor="start" height={160} tickFormatter={(v) => v && String(v).length > 25 ? String(v).substring(0, 25) + "..." : v} tick={{fontSize: 12, fontWeight: "bold", dy: 10, fill: "#475569"}} interval={0} axisLine={false} tickLine={false} />
+                           <XAxis dataKey="name" angle={-90} textAnchor="end" height={160} tickFormatter={(v) => v && String(v).length > 25 ? String(v).substring(0, 25) + "..." : v} tick={{fontSize: 12, fontWeight: "bold", dy: 15, dx: -10, fill: "#475569"}} interval={0} axisLine={false} tickLine={false} />
                            <YAxis {...defaultYAxisProps} />
                            <RechartsTooltip formatter={(v:number)=>formatRial(v)}/>
                            <Line type="monotone" dataKey="netAmt" stroke="#3b82f6" strokeWidth={3} dot={{r:4}} />
@@ -220,7 +220,7 @@ export default function SalesReportsView() {
 <ResponsiveContainer width="100%" height="100%">
 <BarChart data={data.basketL2.slice(0,10)} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
                            <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                           <XAxis dataKey="name" angle={-90} textAnchor="start" height={160} tickFormatter={(v) => v && String(v).length > 25 ? String(v).substring(0, 25) + "..." : v} tick={{fontSize: 12, fontWeight: "bold", dy: 10, fill: "#475569"}} interval={0} axisLine={false} tickLine={false} />
+                           <XAxis dataKey="name" angle={-90} textAnchor="end" height={160} tickFormatter={(v) => v && String(v).length > 25 ? String(v).substring(0, 25) + "..." : v} tick={{fontSize: 12, fontWeight: "bold", dy: 15, dx: -10, fill: "#475569"}} interval={0} axisLine={false} tickLine={false} />
                            <YAxis {...defaultYAxisProps} />
                            <RechartsTooltip formatter={(v:number)=>formatRial(v)}/>
                            <Bar dataKey="netAmt" fill="#10b981" radius={[4,4,0,0]} />
@@ -235,7 +235,7 @@ export default function SalesReportsView() {
 <ResponsiveContainer width="100%" height="100%">
 <LineChart data={data.basketL2.slice(0,10)} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
                            <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                           <XAxis dataKey="name" angle={-90} textAnchor="start" height={160} tickFormatter={(v) => v && String(v).length > 25 ? String(v).substring(0, 25) + "..." : v} tick={{fontSize: 12, fontWeight: "bold", dy: 10, fill: "#475569"}} interval={0} axisLine={false} tickLine={false} />
+                           <XAxis dataKey="name" angle={-90} textAnchor="end" height={160} tickFormatter={(v) => v && String(v).length > 25 ? String(v).substring(0, 25) + "..." : v} tick={{fontSize: 12, fontWeight: "bold", dy: 15, dx: -10, fill: "#475569"}} interval={0} axisLine={false} tickLine={false} />
                            <YAxis {...defaultYAxisProps} />
                            <RechartsTooltip formatter={(v:number)=>formatQty(v)}/>
                            <Line type="monotone" dataKey="netQty" stroke="#f59e0b" strokeWidth={3} dot={{r:4}} />
@@ -285,7 +285,7 @@ export default function SalesReportsView() {
 <ResponsiveContainer width="100%" height="100%">
 <BarChart data={data.profitL1} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
                     <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                    <XAxis dataKey="name" angle={-90} textAnchor="start" height={160} tickFormatter={(v) => v && String(v).length > 25 ? String(v).substring(0, 25) + "..." : v} tick={{fontSize: 12, fontWeight: "bold", dy: 10, fill: "#475569"}} interval={0} axisLine={false} tickLine={false} />
+                    <XAxis dataKey="name" angle={-90} textAnchor="end" height={160} tickFormatter={(v) => v && String(v).length > 25 ? String(v).substring(0, 25) + "..." : v} tick={{fontSize: 12, fontWeight: "bold", dy: 15, dx: -10, fill: "#475569"}} interval={0} axisLine={false} tickLine={false} />
                     <YAxis {...defaultYAxisProps} />
                     <RechartsTooltip formatter={(v:number)=>formatRial(v)}/>
                     <Legend />
@@ -343,7 +343,7 @@ export default function SalesReportsView() {
 <ResponsiveContainer width="100%" height="100%">
 <BarChart data={data.topReturnedCatL1} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
                            <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                           <XAxis dataKey="name" angle={-90} textAnchor="start" height={160} tickFormatter={(v) => v && String(v).length > 25 ? String(v).substring(0, 25) + "..." : v} tick={{fontSize: 12, fontWeight: "bold", dy: 10, fill: "#475569"}} interval={0} axisLine={false} tickLine={false} />
+                           <XAxis dataKey="name" angle={-90} textAnchor="end" height={160} tickFormatter={(v) => v && String(v).length > 25 ? String(v).substring(0, 25) + "..." : v} tick={{fontSize: 12, fontWeight: "bold", dy: 15, dx: -10, fill: "#475569"}} interval={0} axisLine={false} tickLine={false} />
                            <YAxis {...defaultYAxisProps} />
                            <RechartsTooltip formatter={(v:number)=>formatRial(v)}/>
                            <Bar dataKey="returnAmt" name="مبلغ برگشتی" fill="#ef4444" radius={[4,4,0,0]} />
