@@ -22,7 +22,11 @@ const upload = multer({ dest: UPLOADS_DIR });
 
 // --- SQLite Database Initialization ---
 const dbPath = path.join(process.cwd(), "hypermarket.db");
-const db = new Database(dbPath);
+let db = new Database(dbPath);
+db.pragma('journal_mode = WAL');
+db.pragma('synchronous = NORMAL');
+db.pragma('cache_size = -32000'); // 32MB cache
+db.pragma('temp_store = MEMORY');
 
 // Custom function for checking date periods
 db.function('isInPeriod', (dateStr, periodStr) => {
@@ -111,38 +115,60 @@ function isDateInPeriod(
   return String(dateStr).startsWith(period);
 }
 
-db.exec(`
-  CREATE TABLE IF NOT EXISTS files (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    filename TEXT NOT NULL,
-    original_name TEXT NOT NULL,
-    upload_date DATETIME DEFAULT CURRENT_TIMESTAMP,
-    module_type TEXT NOT NULL,
-    row_count INTEGER DEFAULT 0
-  );
+function initDbSchema(database: any) {
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS files (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      filename TEXT NOT NULL,
+      original_name TEXT NOT NULL,
+      upload_date DATETIME DEFAULT CURRENT_TIMESTAMP,
+      module_type TEXT NOT NULL,
+      row_count INTEGER DEFAULT 0
+    );
 
-  CREATE TABLE IF NOT EXISTS raw_data (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    file_id INTEGER,
-    data TEXT NOT NULL, -- JSON string of the row
-    FOREIGN KEY(file_id) REFERENCES files(id) ON DELETE CASCADE
-  );
+    CREATE TABLE IF NOT EXISTS raw_data (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      file_id INTEGER,
+      data TEXT NOT NULL, -- JSON string of the row
+      FOREIGN KEY(file_id) REFERENCES files(id) ON DELETE CASCADE
+    );
 
-  CREATE TABLE IF NOT EXISTS cost_centers (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    allocation_base TEXT NOT NULL,
-    total_cost NUMERIC DEFAULT 0,
-    target_categories TEXT DEFAULT '',
-    allocation_level TEXT DEFAULT 'level_1'
-  );
-`);
+    CREATE TABLE IF NOT EXISTS cost_centers (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      allocation_base TEXT NOT NULL,
+      total_cost NUMERIC DEFAULT 0,
+      target_categories TEXT DEFAULT '',
+      source_accounts TEXT DEFAULT '',
+      allocation_level TEXT DEFAULT 'level_1',
+      is_active INTEGER DEFAULT 1
+    );
 
-try {
-  db.prepare("ALTER TABLE cost_centers ADD COLUMN allocation_level TEXT DEFAULT 'level_1'").run();
-} catch (e) {
-  // column might already exist
+    CREATE TABLE IF NOT EXISTS budgets (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      period TEXT NOT NULL,
+      category TEXT NOT NULL,
+      type TEXT NOT NULL,
+      amount NUMERIC NOT NULL,
+      title TEXT NOT NULL,
+      description TEXT
+    );
+  `);
+
+  try {
+    database.prepare("ALTER TABLE cost_centers ADD COLUMN allocation_level TEXT DEFAULT 'level_1'").run();
+  } catch (e) {}
+
+  try {
+    database.prepare("ALTER TABLE cost_centers ADD COLUMN is_active INTEGER DEFAULT 1").run();
+  } catch (e) {}
+
+  try {
+    database.prepare("ALTER TABLE cost_centers ADD COLUMN source_accounts TEXT DEFAULT ''").run();
+  } catch (e) {}
 }
+
+initDbSchema(db);
 
 // --- API ROUTES ---
 
@@ -153,6 +179,66 @@ app.use(express.json());
 app.get("/api/database/export", (req, res) => {
   res.download(dbPath, `hypermarket_backup_${new Date().getTime()}.db`);
 });
+
+// Import Database
+app.post("/api/database/import", upload.single("file"), (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: "فایلی ارسال نشده است." });
+    }
+    
+    // Close existing DB
+    db.close();
+    
+    // Delete WAL and SHM files to prevent corruption with the new DB file
+    try { if (fs.existsSync(dbPath + '-wal')) fs.unlinkSync(dbPath + '-wal'); } catch(e) {}
+    try { if (fs.existsSync(dbPath + '-shm')) fs.unlinkSync(dbPath + '-shm'); } catch(e) {}
+
+    // Replace the database file
+    fs.copyFileSync(req.file.path, dbPath);
+    
+    // Delete temp file
+    fs.unlinkSync(req.file.path);
+    
+    // Re-initialize DB
+    db = new Database(dbPath);
+    db.pragma('journal_mode = WAL');
+    db.pragma('synchronous = NORMAL');
+    db.pragma('cache_size = -32000');
+    db.pragma('temp_store = MEMORY');
+    
+    initDbSchema(db);
+
+    // Re-register functions
+    db.function('isInPeriod', (dateStr, periodStr) => {
+      if (!periodStr) return 1;
+      if (!dateStr || typeof dateStr !== 'string') return 0;
+      
+      const [pType, pValue] = periodStr.split(':');
+      if (pType === 'Y') return dateStr.startsWith(pValue) ? 1 : 0;
+      if (pType === 'Q') {
+          const [y, q] = pValue.split('-Q');
+          if (!dateStr.startsWith(y)) return 0;
+          const month = parseInt(dateStr.split('/')[1]);
+          const qNum = parseInt(q);
+          const startMonth = (qNum - 1) * 3 + 1;
+          const endMonth = qNum * 3;
+          if (month >= startMonth && month <= endMonth) return 1;
+          return 0;
+      }
+      if (pType === 'M') {
+          return dateStr.startsWith(pValue) ? 1 : 0;
+      }
+      return 1;
+    });
+
+    res.json({ message: "پایگاه داده با موفقیت بازیابی شد." });
+  } catch (err: any) {
+    console.error("Database Import Error:", err);
+    res.status(500).json({ error: "خطا در بازیابی پایگاه داده." });
+  }
+});
+
 
 // 1. Upload Preview API (Step 1)
 app.post("/api/upload-preview", upload.single("file"), (req, res) => {
@@ -183,7 +269,7 @@ app.post("/api/upload-preview", upload.single("file"), (req, res) => {
 // 1.5. Upload Commit API (Step 2)
 app.post("/api/upload-commit", (req, res) => {
   try {
-    const { tempFilename, originalName, module_type, mappings } = req.body;
+    const { tempFilename, originalName, module_type, mappings, staticMappings = {} } = req.body;
     const filePath = path.join(UPLOADS_DIR, tempFilename);
 
     if (!fs.existsSync(filePath)) {
@@ -219,7 +305,9 @@ app.post("/api/upload-commit", (req, res) => {
       for (const row of chunk) {
         const normalizedRow: any = {};
         for (const [sysKey, exKey] of Object.entries(mappings)) {
-          if (exKey && row[exKey as string] !== undefined && row[exKey as string] !== null) {
+          if (exKey === '_STATIC_') {
+              normalizedRow[sysKey] = staticMappings[sysKey] || 'نامشخص';
+          } else if (exKey && row[exKey as string] !== undefined && row[exKey as string] !== null) {
             let val = String(row[exKey as string]).trim();
             // Convert Persian/Arabic numerals to English
             val = val.replace(/[۰-۹]/g, d => '0123456789'['۰۱۲۳۴۵۶۷۸۹'.indexOf(d)]);
@@ -311,6 +399,7 @@ app.get("/api/periods", (req, res) => {
 app.get("/api/dashboard", (req, res) => {
   try {
     const period = (req.query.period as string) || "";
+    const netMode = req.query.netMode !== 'false';
 
     // Check if we have any data
     const rowCountRecord = db
@@ -336,7 +425,7 @@ app.get("/api/dashboard", (req, res) => {
       SELECT 
         SUBSTR(json_extract(data, '$.date'), 1, 7) as monthStr,
         SUM(coalesce(CAST(json_extract(data, '$.totalPrice') AS REAL), CAST(REPLACE(json_extract(data, '$.quantity'), ',', '') AS REAL) * CAST(json_extract(data, '$.price') AS REAL)) * CASE WHEN f.module_type = 'sales_returns' THEN -1 ELSE 1 END) as amount
-      FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type IN ('sales', 'sales_returns')
+      FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type IN ('sales', ${netMode ? "'sales_returns'" : "'sales'"})
       AND isInPeriod(json_extract(data, '$.date'), ?) = 1
       GROUP BY SUBSTR(json_extract(data, '$.date'), 1, 7)
     `,
@@ -361,7 +450,7 @@ app.get("/api/dashboard", (req, res) => {
       SELECT 
         coalesce(json_extract(data, '$.productName'), json_extract(data, '$.productCode'), 'نامشخص') as pName,
         SUM(coalesce(CAST(json_extract(data, '$.totalPrice') AS REAL), CAST(REPLACE(json_extract(data, '$.quantity'), ',', '') AS REAL) * CAST(json_extract(data, '$.price') AS REAL)) * CASE WHEN f.module_type = 'sales_returns' THEN -1 ELSE 1 END) as amount
-      FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type IN ('sales', 'sales_returns')
+      FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type IN ('sales', ${netMode ? "'sales_returns'" : "'sales'"})
       AND isInPeriod(json_extract(data, '$.date'), ?) = 1
       GROUP BY coalesce(json_extract(data, '$.productName'), json_extract(data, '$.productCode'), 'نامشخص')
       ORDER BY amount DESC LIMIT 10
@@ -379,11 +468,11 @@ app.get("/api/dashboard", (req, res) => {
       };
     });
 
-    const getInvValue = (modType: string) => {
+    const getInvValue = (modType: string, qtyField: string = '$.quantity') => {
       const res = db
         .prepare(
           `
-         SELECT SUM(CAST(json_extract(data, '$.quantity') AS REAL) * CAST(coalesce(json_extract(data, '$.price'), '0') AS REAL)) as val
+         SELECT SUM(CAST(REPLACE(json_extract(data, '${qtyField}'), ',', '') AS REAL) * CAST(REPLACE(coalesce(json_extract(data, '$.price'), '0'), ',', '') AS REAL)) as val
          FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type = ?
          AND isInPeriod(json_extract(data, '$.date'), ?) = 1
        `,
@@ -398,7 +487,8 @@ app.get("/api/dashboard", (req, res) => {
       getInvValue("opening_inventory") +
       getInvValue("purchases") -
       getInvValue("purchase_returns") +
-      getInvValue("sales_returns") -
+      getInvValue("sales_returns") +
+      getInvValue("inventory_adjustments", "$.adjustmentQuantity") -
       totalSales;
 
     const finAgg = db
@@ -407,7 +497,7 @@ app.get("/api/dashboard", (req, res) => {
       SELECT 
         SUM(CASE WHEN json_extract(data, '$.transactionType') LIKE '%خروج%' OR CAST(json_extract(data, '$.amount') AS REAL) < 0 THEN ABS(CAST(json_extract(data, '$.amount') AS REAL)) ELSE 0 END) as outcome,
         SUM(CASE WHEN NOT (json_extract(data, '$.transactionType') LIKE '%خروج%' OR CAST(json_extract(data, '$.amount') AS REAL) < 0) THEN ABS(CAST(json_extract(data, '$.amount') AS REAL)) ELSE 0 END) as income
-      FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type = 'finance'
+      FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type IN ('finance_cash', 'finance_bank')
       AND isInPeriod(json_extract(data, '$.date'), ?) = 1
     `,
       )
@@ -416,11 +506,22 @@ app.get("/api/dashboard", (req, res) => {
     let profit = (finAgg?.income || 0) - (finAgg?.outcome || 0);
 
     // Get Top / Bottom selling products and categories for extra cards
-    const topProd = db.prepare(`SELECT coalesce(json_extract(data, '$.productName'), json_extract(data, '$.productCode'), 'نامشخص') as name, SUM(coalesce(CAST(json_extract(data, '$.totalPrice') AS REAL), CAST(REPLACE(json_extract(data, '$.quantity'), ',', '') AS REAL) * CAST(json_extract(data, '$.price') AS REAL)) * CASE WHEN f.module_type = 'sales_returns' THEN -1 ELSE 1 END) as amt FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type IN ('sales', 'sales_returns') AND isInPeriod(json_extract(data, '$.date'), ?) = 1 GROUP BY name ORDER BY amt DESC LIMIT 1`).get(period) as any;
+    const topProd = db.prepare(`SELECT coalesce(json_extract(data, '$.productName'), json_extract(data, '$.productCode'), 'نامشخص') as name, SUM(coalesce(CAST(json_extract(data, '$.totalPrice') AS REAL), CAST(REPLACE(json_extract(data, '$.quantity'), ',', '') AS REAL) * CAST(json_extract(data, '$.price') AS REAL)) * CASE WHEN f.module_type = 'sales_returns' THEN -1 ELSE 1 END) as amt FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type IN ('sales', ${netMode ? "'sales_returns'" : "'sales'"}) AND isInPeriod(json_extract(data, '$.date'), ?) = 1 GROUP BY name ORDER BY amt DESC LIMIT 1`).get(period) as any;
     
-    const botProd = db.prepare(`SELECT coalesce(json_extract(data, '$.productName'), json_extract(data, '$.productCode'), 'نامشخص') as name, SUM(coalesce(CAST(json_extract(data, '$.totalPrice') AS REAL), CAST(REPLACE(json_extract(data, '$.quantity'), ',', '') AS REAL) * CAST(json_extract(data, '$.price') AS REAL)) * CASE WHEN f.module_type = 'sales_returns' THEN -1 ELSE 1 END) as amt FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type IN ('sales', 'sales_returns') AND isInPeriod(json_extract(data, '$.date'), ?) = 1 GROUP BY name HAVING amt > 0 ORDER BY amt ASC LIMIT 1`).get(period) as any;
+    const botProd = db.prepare(`SELECT coalesce(json_extract(data, '$.productName'), json_extract(data, '$.productCode'), 'نامشخص') as name, SUM(coalesce(CAST(json_extract(data, '$.totalPrice') AS REAL), CAST(REPLACE(json_extract(data, '$.quantity'), ',', '') AS REAL) * CAST(json_extract(data, '$.price') AS REAL)) * CASE WHEN f.module_type = 'sales_returns' THEN -1 ELSE 1 END) as amt FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type IN ('sales', ${netMode ? "'sales_returns'" : "'sales'"}) AND isInPeriod(json_extract(data, '$.date'), ?) = 1 GROUP BY name HAVING amt > 0 ORDER BY amt ASC LIMIT 1`).get(period) as any;
 
-    const topDate = db.prepare(`SELECT json_extract(data, '$.date') as date, SUM(coalesce(CAST(json_extract(data, '$.totalPrice') AS REAL), CAST(REPLACE(json_extract(data, '$.quantity'), ',', '') AS REAL) * CAST(json_extract(data, '$.price') AS REAL)) * CASE WHEN f.module_type = 'sales_returns' THEN -1 ELSE 1 END) as amt FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type IN ('sales', 'sales_returns') AND isInPeriod(json_extract(data, '$.date'), ?) = 1 GROUP BY date ORDER BY amt DESC LIMIT 1`).get(period) as any;
+    const topDate = db.prepare(`SELECT json_extract(data, '$.date') as date, SUM(coalesce(CAST(json_extract(data, '$.totalPrice') AS REAL), CAST(REPLACE(json_extract(data, '$.quantity'), ',', '') AS REAL) * CAST(json_extract(data, '$.price') AS REAL)) * CASE WHEN f.module_type = 'sales_returns' THEN -1 ELSE 1 END) as amt FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type IN ('sales', ${netMode ? "'sales_returns'" : "'sales'"}) AND isInPeriod(json_extract(data, '$.date'), ?) = 1 GROUP BY date ORDER BY amt DESC LIMIT 1`).get(period) as any;
+
+    const negativeAdjustments = db
+      .prepare(
+        `SELECT SUM(CAST(REPLACE(json_extract(data, '$.adjustmentQuantity'), ',', '') AS REAL) * CAST(REPLACE(coalesce(json_extract(data, '$.price'), '0'), ',', '') AS REAL)) as val
+         FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type = 'inventory_adjustments'
+         AND CAST(REPLACE(json_extract(data, '$.adjustmentQuantity'), ',', '') AS REAL) < 0
+         AND isInPeriod(json_extract(data, '$.date'), ?) = 1`
+      ).get(period) as any;
+
+    const shrinkValue = Math.abs(negativeAdjustments?.val || 0);
+    const shrinkageRate = totalSales > 0 ? ((shrinkValue / totalSales) * 100).toFixed(2) + "%" : (shrinkValue > 0 ? "دارای کسری (بدون فروش)" : "۰٪");
 
     res.json({
       kpis: {
@@ -428,7 +529,7 @@ app.get("/api/dashboard", (req, res) => {
         netProfitMargin:
           totalSales > 0 ? ((profit / totalSales) * 100).toFixed(2) : "نامشخص",
         inventoryValue: Math.max(0, inventoryValue),
-        shrinkageRate: "نامشخص",
+        shrinkageRate,
       },
       salesTrend,
       paretoData,
@@ -451,7 +552,27 @@ app.get("/api/files", (req, res) => {
 // --- Settings: Cost Centers ---
 app.get("/api/cost-centers", (req, res) => {
   const centers = db.prepare("SELECT * FROM cost_centers").all();
-  res.json(centers);
+  
+  // Get all available accounts globally
+  const financeRows = db.prepare("SELECT data FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type = 'finance_expense'").all();
+  const allAccounts = new Set<string>();
+  for (const r of financeRows as any[]) {
+     try {
+       const parsed = JSON.parse(r.data);
+       const acc = parsed.account?.trim();
+       if (acc) {
+          allAccounts.add(acc);
+       }
+     } catch(e) {}
+  }
+  const globalAccounts = Array.from(allAccounts);
+
+  const enrichedCenters = centers.map((c: any) => ({
+    ...c,
+    available_accounts: globalAccounts
+  }));
+
+  res.json(enrichedCenters);
 });
 
 app.get("/api/product-categories", (req, res) => {
@@ -465,11 +586,11 @@ app.get("/api/product-categories", (req, res) => {
 
     for (const p of products) {
       const parsed = JSON.parse((p as any).data);
-      if (parsed.mainGroup) categories.add(parsed.mainGroup.trim());
-      if (parsed.subGroup)
-        categories.add(
-          parsed.mainGroup.trim() + " - " + parsed.subGroup.trim(),
-        );
+      const mg = typeof parsed.mainGroup === "string" ? parsed.mainGroup.trim() : "";
+      const sg = typeof parsed.subGroup === "string" ? parsed.subGroup.trim() : "";
+      
+      if (mg) categories.add(mg);
+      if (mg && sg) categories.add(mg + " - " + sg);
     }
 
     res.json(Array.from(categories));
@@ -479,16 +600,18 @@ app.get("/api/product-categories", (req, res) => {
 });
 
 app.post("/api/cost-centers", (req, res) => {
-  const { name, allocation_base, total_cost, target_categories, allocation_level } = req.body;
+  const { name, allocation_base, total_cost, target_categories, allocation_level, is_active, source_accounts } = req.body;
   const insert = db.prepare(
-    "INSERT INTO cost_centers (name, allocation_base, total_cost, target_categories, allocation_level) VALUES (?, ?, ?, ?, ?)",
+    "INSERT INTO cost_centers (name, allocation_base, total_cost, target_categories, allocation_level, is_active, source_accounts) VALUES (?, ?, ?, ?, ?, ?, ?)",
   );
   const info = insert.run(
     name,
     allocation_base,
     total_cost,
     target_categories || "",
-    allocation_level || 'level_1'
+    allocation_level || 'level_1',
+    is_active === undefined ? 1 : is_active,
+    source_accounts || ""
   );
   res.json({ id: info.lastInsertRowid });
 });
@@ -498,7 +621,7 @@ app.post("/api/cost-centers/auto-sync", (req, res) => {
     // Look into raw_data for finance module, aggregate by costCenter, and insert/update cost_centers
     const financeData = db
       .prepare(
-        `SELECT data FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type = 'finance'`,
+        `SELECT data FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type = 'finance_expense'`,
       )
       .iterate();
     const costsByCenter: Record<string, number> = {};
@@ -506,7 +629,7 @@ app.post("/api/cost-centers/auto-sync", (req, res) => {
     for (const row of financeData) {
       const parsed = JSON.parse((row as any).data);
       if (parsed.costCenter && parsed.amount) {
-        const center = parsed.costCenter.trim();
+        const name = parsed.costCenter.trim();
         // Convert amount string to number, filter only "خروجی/هزینه" if transactionType exists
         const amount = parseFloat(String(parsed.amount || "").replace(/,/g, ''));
         const tType = parsed.transactionType ? String(parsed.transactionType).trim() : "";
@@ -514,7 +637,7 @@ app.post("/api/cost-centers/auto-sync", (req, res) => {
             continue; // Skip income/deposits if explicitly marked
         }
         if (!isNaN(amount)) {
-          costsByCenter[center] = (costsByCenter[center] || 0) + amount;
+          costsByCenter[name] = (costsByCenter[name] || 0) + amount;
         }
       }
     }
@@ -561,7 +684,7 @@ app.delete("/api/cost-centers/:id", (req, res) => {
 });
 
 app.put("/api/cost-centers/:id", (req, res) => {
-  const { allocation_base, target_categories, allocation_level } = req.body;
+  const { allocation_base, target_categories, allocation_level, is_active, source_accounts } = req.body;
   if (allocation_base) {
     db.prepare("UPDATE cost_centers SET allocation_base = ? WHERE id = ?").run(
       allocation_base,
@@ -573,18 +696,467 @@ app.put("/api/cost-centers/:id", (req, res) => {
       "UPDATE cost_centers SET target_categories = ? WHERE id = ?",
     ).run(target_categories, req.params.id);
   }
+  if (source_accounts !== undefined) {
+    db.prepare(
+      "UPDATE cost_centers SET source_accounts = ? WHERE id = ?",
+    ).run(source_accounts, req.params.id);
+  }
   if (allocation_level) {
     db.prepare("UPDATE cost_centers SET allocation_level = ? WHERE id = ?").run(
       allocation_level,
       req.params.id,
     );
   }
+  if (is_active !== undefined) {
+    db.prepare("UPDATE cost_centers SET is_active = ? WHERE id = ?").run(
+      is_active,
+      req.params.id,
+    );
+  }
   res.json({ message: "مرکز هزینه به‌روز شد." });
+});
+
+app.put("/api/cost-centers-bulk/source-accounts", (req, res) => {
+  const { source_accounts } = req.body;
+  if (source_accounts !== undefined) {
+    db.prepare("UPDATE cost_centers SET source_accounts = ?").run(source_accounts);
+  }
+  res.json({ message: "تمامی مراکز هزینه به‌روز شدند." });
+});
+
+app.get("/api/reports/cost-control", (req, res) => {
+  try {
+    const period = (req.query.period as string) || "";
+    const comparePeriod = (req.query.comparePeriod as string) || "";
+    const grouping = (req.query.grouping as string) || "monthly";
+    const netMode = req.query.netMode !== 'false';
+    const analysisField = (req.query.analysisField as string) === 'tafsil' ? 'tafsil' : 'account';
+    const accountFilterStr = (req.query.accountFilter as string) || "";
+    const accountFilter = accountFilterStr ? accountFilterStr.split(',') : [];
+    
+    const tafsilFilterStr = (req.query.tafsilFilter as string) || "";
+    const tafsilFilter = tafsilFilterStr ? tafsilFilterStr.split(',') : [];
+
+    let filterConditions = "";
+    if (accountFilter.length > 0) filterConditions += ` AND json_extract(data, '$.account') IN (${accountFilter.map(()=>'?').join(',')})`;
+    if (tafsilFilter.length > 0) filterConditions += ` AND json_extract(data, '$.tafsil') IN (${tafsilFilter.map(()=>'?').join(',')})`;
+
+    // 1. Get total sales for the period
+    const salesAgg = db.prepare(`
+      SELECT SUM(coalesce(CAST(json_extract(data, '$.totalPrice') AS REAL), CAST(REPLACE(json_extract(data, '$.quantity'), ',', '') AS REAL) * CAST(json_extract(data, '$.price') AS REAL)) * CASE WHEN f.module_type = 'sales_returns' THEN -1 ELSE 1 END) as amount
+      FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type IN ('sales', ${netMode ? "'sales_returns'" : "'sales'"})
+      AND isInPeriod(json_extract(data, '$.date'), ?) = 1
+    `).get(period) as any;
+    const totalSales = salesAgg?.amount || 0;
+
+    // 2. Get total net income for the period (simplified: sales - cogs - expenses)
+    const purchasesAgg = db.prepare(`
+      SELECT SUM(CAST(REPLACE(json_extract(data, '$.totalPrice'), ',', '') AS REAL)) as amount
+      FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type = 'purchases'
+      AND isInPeriod(json_extract(data, '$.date'), ?) = 1
+    `).get(period) as any;
+    const totalCOGS = purchasesAgg?.amount || 0;
+
+    const expParams: any[] = [period];
+    if (accountFilter.length > 0) expParams.push(...accountFilter);
+    if (tafsilFilter.length > 0) expParams.push(...tafsilFilter);
+
+    const allExpensesAgg = db.prepare(`
+      SELECT SUM(CAST(REPLACE(json_extract(data, '$.amount'), ',', '') AS REAL)) as amount
+      FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type = 'cost_control'
+      AND isInPeriod(json_extract(data, '$.date'), ?) = 1
+      ${filterConditions}
+    `).get(...expParams) as any;
+    const totalAllExpenses = allExpensesAgg?.amount || 0;
+    const netIncome = totalSales - totalCOGS - totalAllExpenses;
+
+    // Compare period overall totals
+    let compareTotalSales = 0;
+    let compareTotalAllExpenses = 0;
+    let compareTotalCOGS = 0;
+    if (comparePeriod) {
+       const compSalesAgg = db.prepare(`
+         SELECT SUM(coalesce(CAST(json_extract(data, '$.totalPrice') AS REAL), CAST(REPLACE(json_extract(data, '$.quantity'), ',', '') AS REAL) * CAST(json_extract(data, '$.price') AS REAL)) * CASE WHEN f.module_type = 'sales_returns' THEN -1 ELSE 1 END) as amount
+         FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type IN ('sales', ${netMode ? "'sales_returns'" : "'sales'"})
+         AND isInPeriod(json_extract(data, '$.date'), ?) = 1
+       `).get(comparePeriod) as any;
+       compareTotalSales = compSalesAgg?.amount || 0;
+
+       const compCOGSAgg = db.prepare(`
+         SELECT SUM(CAST(REPLACE(json_extract(data, '$.totalPrice'), ',', '') AS REAL)) as amount
+         FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type = 'purchases'
+         AND isInPeriod(json_extract(data, '$.date'), ?) = 1
+       `).get(comparePeriod) as any;
+       compareTotalCOGS = compCOGSAgg?.amount || 0;
+
+       const compExpParams: any[] = [comparePeriod];
+       if (accountFilter.length > 0) compExpParams.push(...accountFilter);
+       if (tafsilFilter.length > 0) compExpParams.push(...tafsilFilter);
+
+       const compAllExpensesAgg = db.prepare(`
+         SELECT SUM(CAST(REPLACE(json_extract(data, '$.amount'), ',', '') AS REAL)) as amount
+         FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type = 'cost_control'
+         AND isInPeriod(json_extract(data, '$.date'), ?) = 1
+         ${filterConditions}
+       `).get(...compExpParams) as any;
+       compareTotalAllExpenses = compAllExpensesAgg?.amount || 0;
+    }
+
+    const paramsCurrent: any[] = [period];
+    if (accountFilter.length > 0) paramsCurrent.push(...accountFilter);
+    if (tafsilFilter.length > 0) paramsCurrent.push(...tafsilFilter);
+
+    // 3. Get expenses grouped by account for the CURRENT period
+    const currentExpenses = db.prepare(`
+      SELECT 
+        json_extract(data, '$.${analysisField}') as account,
+        SUM(CAST(REPLACE(json_extract(data, '$.amount'), ',', '') AS REAL)) as total
+      FROM raw_data r JOIN files f ON r.file_id = f.id 
+      WHERE f.module_type = 'cost_control' 
+      AND isInPeriod(json_extract(data, '$.date'), ?) = 1
+      ${filterConditions}
+      GROUP BY json_extract(data, '$.${analysisField}')
+      ORDER BY total DESC
+    `).all(...paramsCurrent) as any[];
+
+    const paramsCompare: any[] = [comparePeriod];
+    if (accountFilter.length > 0) paramsCompare.push(...accountFilter);
+    if (tafsilFilter.length > 0) paramsCompare.push(...tafsilFilter);
+
+    // Compare period expenses
+    const compareExpenses = comparePeriod ? db.prepare(`
+      SELECT 
+        json_extract(data, '$.${analysisField}') as account,
+        SUM(CAST(REPLACE(json_extract(data, '$.amount'), ',', '') AS REAL)) as total
+      FROM raw_data r JOIN files f ON r.file_id = f.id 
+      WHERE f.module_type = 'cost_control' 
+      AND isInPeriod(json_extract(data, '$.date'), ?) = 1
+      ${filterConditions}
+      GROUP BY json_extract(data, '$.${analysisField}')
+    `).all(...paramsCompare) as any[] : [];
+    
+    const compareMap = new Map();
+    compareExpenses.forEach((c: any) => compareMap.set(c.account, c.total));
+
+    const paramsRaw: any[] = [];
+    if (accountFilter.length > 0) paramsRaw.push(...accountFilter);
+    if (tafsilFilter.length > 0) paramsRaw.push(...tafsilFilter);
+
+    // 4. Raw expenses for historical trend
+    const rawExpenses = db.prepare(`
+      SELECT 
+        json_extract(data, '$.${analysisField}') as account,
+        json_extract(data, '$.date') as date,
+        CAST(REPLACE(json_extract(data, '$.amount'), ',', '') AS REAL) as amount
+      FROM raw_data r JOIN files f ON r.file_id = f.id 
+      WHERE f.module_type = 'cost_control'
+      ${filterConditions}
+    `).all(...paramsRaw) as any[];
+
+    // 4b. Raw sales for historical trend (for ratio)
+    const rawSales = db.prepare(`
+      SELECT 
+        json_extract(data, '$.date') as date,
+        coalesce(CAST(json_extract(data, '$.totalPrice') AS REAL), CAST(REPLACE(json_extract(data, '$.quantity'), ',', '') AS REAL) * CAST(json_extract(data, '$.price') AS REAL)) * CASE WHEN f.module_type = 'sales_returns' THEN -1 ELSE 1 END as amount
+      FROM raw_data r JOIN files f ON r.file_id = f.id 
+      WHERE f.module_type IN ('sales', ${netMode ? "'sales_returns'" : "'sales'"})
+    `).all() as any[];
+
+    const historyAgg: Record<string, Record<string, number>> = {};
+    const salesHistoryAgg: Record<string, number> = {};
+    const totalExpHistoryAgg: Record<string, number> = {};
+    const allLabels = new Set<string>();
+    
+    let minJDN = Infinity;
+    const parsedRows = [];
+    
+    for (const r of rawExpenses) {
+        if (!r.date || !r.account) continue;
+        const dStr = String(r.date);
+        let gLabel = "";
+        
+        if (grouping === 'monthly') {
+            gLabel = dStr.substring(0, 7);
+            allLabels.add(gLabel);
+            if (!historyAgg[r.account]) historyAgg[r.account] = {};
+            historyAgg[r.account][gLabel] = (historyAgg[r.account][gLabel] || 0) + (r.amount || 0);
+            totalExpHistoryAgg[gLabel] = (totalExpHistoryAgg[gLabel] || 0) + (r.amount || 0);
+        } else if (grouping === 'daily') {
+            gLabel = dStr;
+            allLabels.add(gLabel);
+            if (!historyAgg[r.account]) historyAgg[r.account] = {};
+            historyAgg[r.account][gLabel] = (historyAgg[r.account][gLabel] || 0) + (r.amount || 0);
+            totalExpHistoryAgg[gLabel] = (totalExpHistoryAgg[gLabel] || 0) + (r.amount || 0);
+        } else if (grouping === 'weekly') {
+            const parts = dStr.split('/');
+            if (parts.length === 3) {
+               const jy = parseInt(parts[0]);
+               const jm = parseInt(parts[1]);
+               const jd = parseInt(parts[2]);
+               if (jy && jm && jd) {
+                   const gDate = jalaali.toGregorian(jy, jm, jd);
+                   const jdn = Math.floor(new Date(gDate.gy, gDate.gm - 1, gDate.gd).getTime() / 86400000);
+                   if (jdn < minJDN) minJDN = jdn;
+                   parsedRows.push({ account: r.account, jdn, amount: r.amount || 0 });
+               }
+            }
+        }
+    }
+
+    if (grouping === 'weekly' && parsedRows.length > 0) {
+        for (const r of parsedRows) {
+            const weekNum = Math.floor((r.jdn - minJDN) / 7) + 1;
+            const gLabel = `هفته ${weekNum}`;
+            allLabels.add(gLabel);
+            if (!historyAgg[r.account]) historyAgg[r.account] = {};
+            historyAgg[r.account][gLabel] = (historyAgg[r.account][gLabel] || 0) + r.amount;
+            totalExpHistoryAgg[gLabel] = (totalExpHistoryAgg[gLabel] || 0) + r.amount;
+        }
+    }
+
+    const parsedSalesRows = [];
+    for (const r of rawSales) {
+        if (!r.date) continue;
+        const dStr = String(r.date);
+        let gLabel = "";
+        
+        if (grouping === 'monthly') {
+            gLabel = dStr.substring(0, 7);
+            allLabels.add(gLabel);
+            salesHistoryAgg[gLabel] = (salesHistoryAgg[gLabel] || 0) + (r.amount || 0);
+        } else if (grouping === 'daily') {
+            gLabel = dStr;
+            allLabels.add(gLabel);
+            salesHistoryAgg[gLabel] = (salesHistoryAgg[gLabel] || 0) + (r.amount || 0);
+        } else if (grouping === 'weekly') {
+            const parts = dStr.split('/');
+            if (parts.length === 3) {
+               const jy = parseInt(parts[0]);
+               const jm = parseInt(parts[1]);
+               const jd = parseInt(parts[2]);
+               if (jy && jm && jd) {
+                   const gDate = jalaali.toGregorian(jy, jm, jd);
+                   const jdn = Math.floor(new Date(gDate.gy, gDate.gm - 1, gDate.gd).getTime() / 86400000);
+                   if (jdn < minJDN) minJDN = jdn;
+                   parsedSalesRows.push({ jdn, amount: r.amount || 0 });
+               }
+            }
+        }
+    }
+
+    if (grouping === 'weekly' && parsedSalesRows.length > 0) {
+        for (const r of parsedSalesRows) {
+            const weekNum = Math.floor((r.jdn - minJDN) / 7) + 1;
+            const gLabel = `هفته ${weekNum}`;
+            allLabels.add(gLabel);
+            salesHistoryAgg[gLabel] = (salesHistoryAgg[gLabel] || 0) + r.amount;
+        }
+    }
+
+    const sortedLabels = Array.from(allLabels).sort((a, b) => {
+       if (grouping === 'weekly') {
+          return parseInt(a.replace('هفته ', '')) - parseInt(b.replace('هفته ', ''));
+       }
+       return a.localeCompare(b);
+    });
+
+    const timelineData = sortedLabels.map(label => {
+       const item: any = { period: label };
+       for (const acc in historyAgg) {
+          item[acc] = historyAgg[acc][label] || 0;
+       }
+       const tSales = salesHistoryAgg[label] || 0;
+       const tExp = totalExpHistoryAgg[label] || 0;
+       item.ratioOfSales = tSales > 0 ? (tExp / tSales) * 100 : 0;
+       item.totalSales = tSales;
+       item.totalExp = tExp;
+       return item;
+    });
+
+    const topAccounts = currentExpenses.slice(0, 10).map(e => e.account);
+
+    // Structure the result
+    const totalPeriods = allLabels.size > 0 ? allLabels.size : 1;
+
+    const costAnalysisMap = new Map();
+    
+    currentExpenses.forEach(exp => {
+       const account = exp.account || 'نامشخص';
+       costAnalysisMap.set(account, { account, amount: exp.total || 0 });
+    });
+
+    if (comparePeriod) {
+       compareExpenses.forEach(exp => {
+          const account = exp.account || 'نامشخص';
+          if (!costAnalysisMap.has(account)) {
+             costAnalysisMap.set(account, { account, amount: 0 });
+          }
+       });
+    }
+
+    const costAnalysis = Array.from(costAnalysisMap.values()).map(exp => {
+       const account = exp.account;
+       const amount = exp.amount;
+       
+       const percentOfSales = totalSales > 0 ? (amount / totalSales) * 100 : 0;
+       const percentOfNetIncome = netIncome > 0 ? (amount / netIncome) * 100 : (netIncome < 0 ? (amount / Math.abs(netIncome)) * -100 : 0);
+
+       const compAmount = compareMap.get(account) || 0;
+       let trendPercent = 0;
+       if (compAmount > 0) {
+          trendPercent = ((amount - compAmount) / compAmount) * 100;
+       } else if (compAmount === 0 && amount > 0 && comparePeriod) {
+          trendPercent = 100;
+       } else if (compAmount > 0 && amount === 0 && comparePeriod) {
+          trendPercent = -100;
+       }
+
+       const allTimeTotalForAccount = Object.values(historyAgg[account] || {}).reduce((sum: any, val: any) => sum + val, 0);
+       const avgAmount = allTimeTotalForAccount / totalPeriods;
+       const isAnomaly = avgAmount > 0 && amount > (avgAmount * 1.5);
+
+       return {
+         account,
+         amount,
+         percentOfSales,
+         percentOfNetIncome,
+         trendPercent,
+         avgAmount,
+         isAnomaly
+       };
+    }).sort((a, b) => b.amount - a.amount);
+
+    res.json({
+       totalSales,
+       netIncome,
+       totalExpenses: totalAllExpenses,
+       compareTotalSales,
+       compareTotalExpenses: compareTotalAllExpenses,
+       compareNetIncome: compareTotalSales - compareTotalCOGS - compareTotalAllExpenses,
+       costAnalysis,
+       timelineData,
+       topAccounts
+    });
+  } catch (err: any) {
+    console.error("Cost Control Report Error:", err);
+    res.status(500).json({ error: "خطا در تهیه گزارش کنترل هزینه‌ها: " + err.message });
+  }
+});
+
+app.get("/api/reports/cost-control/accounts", (req, res) => {
+  try {
+    const rows = db.prepare(`
+      SELECT DISTINCT json_extract(data, '$.account') as account
+      FROM raw_data r JOIN files f ON r.file_id = f.id 
+      WHERE f.module_type = 'cost_control'
+    `).all() as any[];
+    const accounts = rows.map(r => r.account).filter(Boolean);
+    res.json(accounts);
+  } catch (err: any) {
+    res.status(500).json({ error: "خطا در دریافت سرفصل‌ها" });
+  }
+});
+
+app.get("/api/reports/cost-control/tafsils", (req, res) => {
+  try {
+    const rows = db.prepare(`
+      SELECT DISTINCT json_extract(data, '$.tafsil') as tafsil
+      FROM raw_data r JOIN files f ON r.file_id = f.id 
+      WHERE f.module_type = 'cost_control'
+    `).all() as any[];
+    const tafsils = rows.map(r => r.tafsil).filter(Boolean);
+    res.json(tafsils);
+  } catch (err: any) {
+    res.status(500).json({ error: "خطا در دریافت تفصیل‌ها" });
+  }
+});
+
+app.get("/api/reports/cost-control/comprehensive", (req, res) => {
+  try {
+    const period = (req.query.period as string) || "";
+    const comparePeriod = (req.query.comparePeriod as string) || "";
+    const accountsFilter = (req.query.accounts as string) || "";
+    const tafsilsFilter = (req.query.tafsils as string) || "";
+
+    const accounts = accountsFilter ? accountsFilter.split(',') : [];
+    const tafsils = tafsilsFilter ? tafsilsFilter.split(',') : [];
+
+    let filterClause = "";
+    const baseParams: any[] = [];
+    if (accounts.length > 0) {
+      filterClause += ` AND json_extract(data, '$.account') IN (${accounts.map(() => '?').join(',')})`;
+      baseParams.push(...accounts);
+    }
+    if (tafsils.length > 0) {
+      filterClause += ` AND json_extract(data, '$.tafsil') IN (${tafsils.map(() => '?').join(',')})`;
+      baseParams.push(...tafsils);
+    }
+
+    const currentParams = [period, ...baseParams];
+    const dataRaw = db.prepare(`
+      SELECT 
+        json_extract(data, '$.account') as account,
+        json_extract(data, '$.tafsil') as tafsil,
+        SUM(CAST(REPLACE(json_extract(data, '$.amount'), ',', '') AS REAL)) as total
+      FROM raw_data r JOIN files f ON r.file_id = f.id 
+      WHERE f.module_type = 'cost_control' AND isInPeriod(json_extract(data, '$.date'), ?) = 1 ${filterClause}
+      GROUP BY json_extract(data, '$.account'), json_extract(data, '$.tafsil')
+    `).all(...currentParams) as any[];
+
+    const dataMap = new Map();
+    dataRaw.forEach(d => dataMap.set(`${d.account || ''}|${d.tafsil || ''}`, { account: d.account, tafsil: d.tafsil, total: d.total }));
+
+    if (comparePeriod) {
+       const compareParams = [comparePeriod, ...baseParams];
+       const compareDataRaw = db.prepare(`
+         SELECT 
+           json_extract(data, '$.account') as account,
+           json_extract(data, '$.tafsil') as tafsil,
+           SUM(CAST(REPLACE(json_extract(data, '$.amount'), ',', '') AS REAL)) as total
+         FROM raw_data r JOIN files f ON r.file_id = f.id 
+         WHERE f.module_type = 'cost_control' AND isInPeriod(json_extract(data, '$.date'), ?) = 1 ${filterClause}
+         GROUP BY json_extract(data, '$.account'), json_extract(data, '$.tafsil')
+       `).all(...compareParams) as any[];
+
+       compareDataRaw.forEach(c => {
+          const key = `${c.account || ''}|${c.tafsil || ''}`;
+          if (!dataMap.has(key)) {
+             dataMap.set(key, { account: c.account, tafsil: c.tafsil, total: 0 });
+          }
+          const item = dataMap.get(key);
+          item.compVal = c.total;
+       });
+    }
+
+    const resultData = Array.from(dataMap.values()).map(d => {
+       const compVal = d.compVal || 0;
+       if (compVal > 0) {
+          d.trendPercent = ((d.total - compVal) / compVal) * 100;
+       } else if (d.total > 0) {
+          d.trendPercent = 100;
+       } else {
+          d.trendPercent = 0;
+       }
+       return d;
+    }).sort((a, b) => {
+       if (a.account !== b.account) {
+           return (a.account || "").localeCompare(b.account || "");
+       }
+       return b.total - a.total;
+    });
+
+    res.json(resultData);
+  } catch(err: any) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // --- Advanced Reports endpoints ---
 app.get("/api/reports/cost-allocation", (req, res) => {
   try {
+    const salesPeriod = (req.query.salesPeriod as string) || "";
+    const costPeriod = (req.query.costPeriod as string) || "";
+    const netMode = req.query.netMode !== 'false';
     // In a real robust scenario with massive data, we'd do complex SQL JOINs on the json data.
     // For now, let's build the report by querying the raw_data table and aggregating in JS
     // which handles JSON properties flexibly.
@@ -615,13 +1187,72 @@ app.get("/api/reports/cost-allocation", (req, res) => {
        json_extract(data, '$.receiptCode') as recCode,
        SUBSTR(coalesce(json_extract(data, '$.time'), '12:00'), 1, 2) as hour,
        f.module_type
-      FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type IN ('sales', 'purchases', 'sales_returns', 'purchase_returns')
+      FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type IN ('sales', 'purchases', ${netMode ? "'sales_returns'" : "'sales'"}, ${netMode ? "'purchase_returns'" : "'purchases'"})
+      AND isInPeriod(json_extract(data, '$.date'), ?) = 1
     `
       )
-      .iterate();
+      .iterate(salesPeriod);
 
     // 5. Get cost centers
-    const costCenters = db.prepare("SELECT * FROM cost_centers").all() as any[];
+    const allCostCenters = db.prepare("SELECT * FROM cost_centers").all() as any[];
+    // Filter out inactive cost centers for calculation
+    const costCenters = allCostCenters.filter(cc => cc.is_active === 1 || cc.is_active === undefined || cc.is_active === true);
+
+    
+    const allSyncedCenters = new Set(
+        db.prepare("SELECT json_extract(data, '$.costCenter') as cc FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type = 'finance_expense'").all().map((r: any) => r.cc?.trim()).filter(Boolean)
+    );
+
+    // Get all available accounts globally
+    const financeRows = db.prepare("SELECT data FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type = 'finance_expense'").all();
+    const allAccounts = new Set<string>();
+    for (const r of financeRows as any[]) {
+       try {
+         const parsed = JSON.parse(r.data);
+         const acc = parsed.account?.trim();
+         if (acc) {
+            allAccounts.add(acc);
+         }
+       } catch(e) {}
+    }
+    const globalAccounts = Array.from(allAccounts);
+
+    const financeData = db
+        .prepare("SELECT data FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type = 'finance_expense' AND isInPeriod(json_extract(data, '$.date'), ?) = 1")
+        .iterate(costPeriod);
+        
+    const periodCostsByCenter: Record<string, number> = {};
+    for (const row of financeData) {
+        const parsed = JSON.parse((row as any).data);
+        if (parsed.costCenter && parsed.amount) {
+            const center = parsed.costCenter.trim();
+            const account = parsed.account ? parsed.account.trim() : "";
+            
+            const centerConfig = costCenters.find(c => c.name === center);
+            if (centerConfig && centerConfig.source_accounts) {
+                 const allowedAccounts = centerConfig.source_accounts.split(',').filter(Boolean);
+                 if (allowedAccounts.length > 0 && !allowedAccounts.includes(account)) {
+                     continue; // Skip this row, its account is not selected
+                 }
+            }
+
+            const amount = parseFloat(String(parsed.amount || "").replace(/,/g, ''));
+            const tType = parsed.transactionType ? String(parsed.transactionType).trim() : "";
+            if (tType && (tType.includes("ورود") || tType.includes("دریافت") || tType.includes("درآمد") || tType.includes("واریز"))) {
+                continue;
+            }
+            if (!isNaN(amount)) {
+                periodCostsByCenter[center] = (periodCostsByCenter[center] || 0) + amount;
+            }
+        }
+    }
+
+    for (const c of costCenters) {
+        if (allSyncedCenters.has(c.name)) {
+            c.total_cost = periodCostsByCenter[c.name] || 0;
+        }
+        c.available_accounts = globalAccounts;
+    }
 
     // Calculate dynamic cost allocation
     const categoryTotals: Record<string, any> = {};
@@ -636,7 +1267,7 @@ app.get("/api/reports/cost-allocation", (req, res) => {
         productCategoryMap[row.code] = `${l1}|${l2}`;
 
         if (row.ac) {
-          const ac = row.ac.trim();
+          const ac = String(row.ac).trim();
           if (!autoCenterTargets[ac]) autoCenterTargets[ac] = new Set();
           autoCenterTargets[ac].add(l1);
         }
@@ -701,6 +1332,16 @@ app.get("/api/reports/cost-allocation", (req, res) => {
       }
     }
 
+    totalGlobalSales = 0;
+    totalGlobalPurchases = 0;
+
+    for (const [catKey, t] of Object.entries(categoryTotals)) {
+       const sAmt = netMode ? (t.salesAmt - t.salesRetAmt) : t.salesAmt;
+       const pAmt = netMode ? (t.purchaseAmt - t.pRetAmt) : t.purchaseAmt;
+       totalGlobalSales += Math.max(0, sAmt);
+       totalGlobalPurchases += Math.max(0, pAmt);
+    }
+
     const reportRows: any[] = [];
     let totalCostAllocated = 0;
 
@@ -711,32 +1352,47 @@ app.get("/api/reports/cost-allocation", (req, res) => {
     // Phase 2: Distribute Cost Centers to targeted Categories
     for (const cc of costCenters) {
       let tCat: string[] = cc.target_categories ? cc.target_categories.split(",") : [];
-      if (tCat.length === 0 && autoCenterTargets[cc.name]) {
-         tCat = Array.from(autoCenterTargets[cc.name]);
+      if (tCat.length === 0) {
+         if (autoCenterTargets[cc.name]) {
+             tCat = Array.from(autoCenterTargets[cc.name]);
+         } else {
+             // Try to match if cc.name is 'Center - Account'
+             const parts = cc.name.split(' - ');
+             if (parts.length > 1 && autoCenterTargets[parts[0]]) {
+                 tCat = Array.from(autoCenterTargets[parts[0]]);
+             }
+         }
       }
 
       const getBaseValue = (cat: any) => {
+         const sAmt = Math.max(0, netMode ? (cat.salesAmt - cat.salesRetAmt) : cat.salesAmt);
+         const pAmt = Math.max(0, netMode ? (cat.purchaseAmt - cat.pRetAmt) : cat.purchaseAmt);
+         const sQty = Math.max(0, netMode ? (cat.qtySales - cat.qtySalesRet) : cat.qtySales);
+         const pQty = Math.max(0, netMode ? (cat.qtyPurchase - cat.qtyPRet) : cat.qtyPurchase);
+         const sInvCount = Math.max(0, netMode ? (cat.sInvoices.size - cat.sRetInvoices.size) : cat.sInvoices.size);
+         const pInvCount = Math.max(0, netMode ? (cat.pInvoices.size - cat.pRetInvoices.size) : cat.pInvoices.size);
+
          // Original Bases
-         if (cc.allocation_base === "sales_value" || cc.allocation_base === "sales_price") return cat.salesAmt;
-         if (cc.allocation_base === "purchase_value" || cc.allocation_base === "purchase_price") return cat.purchaseAmt;
-         if (cc.allocation_base === "sales_qty") return cat.qtySales;
-         if (cc.allocation_base === "purchase_qty") return cat.qtyPurchase;
-         if (cc.allocation_base === "sales_invoice_count") return cat.sInvoices.size;
-         if (cc.allocation_base === "purchase_invoice_count") return cat.pInvoices.size;
+         if (cc.allocation_base === "sales_value" || cc.allocation_base === "sales_price") return sAmt;
+         if (cc.allocation_base === "purchase_value" || cc.allocation_base === "purchase_price") return pAmt;
+         if (cc.allocation_base === "sales_qty") return sQty;
+         if (cc.allocation_base === "purchase_qty") return pQty;
+         if (cc.allocation_base === "sales_invoice_count") return sInvCount;
+         if (cc.allocation_base === "purchase_invoice_count") return pInvCount;
          if (cc.allocation_base === "time_spent") return cat.sLines; // Time spent corresponds to sales lines processing
          
          // New Combined Bases
-         if (cc.allocation_base === "sales_and_purchase_qty") return cat.qtySales + cat.qtyPurchase;
-         if (cc.allocation_base === "sales_and_purchase_value") return cat.salesAmt + cat.purchaseAmt;
+         if (cc.allocation_base === "sales_and_purchase_qty") return sQty + pQty;
+         if (cc.allocation_base === "sales_and_purchase_value") return sAmt + pAmt;
          if (cc.allocation_base === "sales_and_purchase_hours") return cat.sHours + cat.pHours;
-         if (cc.allocation_base === "sales_and_purchase_invoice_count") return cat.sInvoices.size + cat.pInvoices.size;
+         if (cc.allocation_base === "sales_and_purchase_invoice_count") return sInvCount + pInvCount;
          if (cc.allocation_base === "sales_and_purchase_price") return cat.sPriceTotal + cat.pPriceTotal;
          if (cc.allocation_base === "sales_and_purchase_and_returns_price") return cat.sPriceTotal + cat.pPriceTotal + cat.sRetPriceTotal + cat.pRetPriceTotal;
          if (cc.allocation_base === "sales_and_purchase_and_returns_invoice_count") return cat.sInvoices.size + cat.pInvoices.size + cat.sRetInvoices.size + cat.pRetInvoices.size;
          if (cc.allocation_base === "sales_and_purchase_and_returns_qty") return cat.qtySales + cat.qtyPurchase + cat.qtySalesRet + cat.qtyPRet;
          if (cc.allocation_base === "sales_and_purchase_and_returns_hours") return cat.sHours + cat.pHours + cat.sRetHours + cat.pRetHours;
 
-         return cat.salesAmt; // fallback
+         return sAmt; // fallback
       };
 
       // Find valid categories and sum their base values
@@ -779,28 +1435,35 @@ app.get("/api/reports/cost-allocation", (req, res) => {
     for (const [catKey, t] of Object.entries(categoryTotals)) {
       const [level1, level2] = catKey.split("|");
 
+      const sAmt = netMode ? (t.salesAmt - t.salesRetAmt) : t.salesAmt;
+      const pAmt = netMode ? (t.purchaseAmt - t.pRetAmt) : t.purchaseAmt;
+
+      // Ensure positive values to not break graphs
+      const validSAmt = Math.max(0, sAmt);
+      const validPAmt = Math.max(0, pAmt);
+
       // Calc global ratios for display
-      const salesRatio = totalGlobalSales ? t.salesAmt / totalGlobalSales : 0;
-      const purchaseRatio = totalGlobalPurchases ? t.purchaseAmt / totalGlobalPurchases : 0;
+      const salesRatio = totalGlobalSales ? validSAmt / totalGlobalSales : 0;
+      const purchaseRatio = totalGlobalPurchases ? validPAmt / totalGlobalPurchases : 0;
       const ratioCost = totalCostAllocated > 0 ? t.allocatedCost / totalCostAllocated : 0;
 
       reportRowsLevel2.push({
         level1,
         level2,
-        purchaseAmt: t.purchaseAmt,
+        purchaseAmt: validPAmt,
         purchaseRatio: (purchaseRatio * 100).toFixed(2),
-        salesAmt: t.salesAmt,
+        salesAmt: validSAmt,
         salesRatio: (salesRatio * 100).toFixed(2),
         costAmt: Math.round(t.allocatedCost),
         costRatio: (ratioCost * 100).toFixed(2),
-        costToSales: t.salesAmt ? ((t.allocatedCost / t.salesAmt) * 100).toFixed(2) : 0,
+        costToSales: validSAmt ? ((t.allocatedCost / validSAmt) * 100).toFixed(2) : 0,
       });
 
       if (!level1Totals[level1]) {
          level1Totals[level1] = { salesAmt: 0, purchaseAmt: 0, allocatedCost: 0 };
       }
-      level1Totals[level1].salesAmt += t.salesAmt;
-      level1Totals[level1].purchaseAmt += t.purchaseAmt;
+      level1Totals[level1].salesAmt += validSAmt;
+      level1Totals[level1].purchaseAmt += validPAmt;
       level1Totals[level1].allocatedCost += t.allocatedCost;
     }
 
@@ -832,10 +1495,14 @@ app.get("/api/reports/cost-allocation", (req, res) => {
         .map(([name, value]) => ({ name, value }))
         .sort((a, b) => b.value - a.value)
         .slice(0, 5);
+      
+      const chartTotalCost = chartData.reduce((acc, curr) => acc + curr.value, 0);
+
       return {
         id: cc.id,
         name: cc.name,
         total_cost: cc.total_cost,
+        chartTotalCost: chartTotalCost > 0 ? chartTotalCost : cc.total_cost || 1, // Fallback to avoid div by zero in client
         allocation_base: cc.allocation_base,
         target_categories: cc.target_categories,
         chartData,
@@ -867,6 +1534,7 @@ app.get("/api/reports/cost-allocation", (req, res) => {
 app.get("/api/reports/pareto", (req, res) => {
   try {
     const period = (req.query.period as string) || "";
+    const netMode = req.query.netMode !== 'false';
     // Interval settings for invoice classification
     const intervalSettingsStr = (req.query.intervalSettings as string);
     let intervalSettings: any = { enabled: false, min: 0, max: 10000000, step: 1000000 };
@@ -886,7 +1554,7 @@ app.get("/api/reports/pareto", (req, res) => {
     }
 
     // 2. Get Sales data including returns
-    const sales = db.prepare("SELECT json_extract(data, '$.productCode') as code, json_extract(data, '$.productName') as name, CAST(REPLACE(json_extract(data, '$.quantity'), ',', '') AS REAL) as qty, CAST(json_extract(data, '$.price') AS REAL) as price, CAST(json_extract(data, '$.totalPrice') AS REAL) as totalPrice, json_extract(data, '$.invoiceCode') as invCode, json_extract(data, '$.date') as date, f.module_type FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type IN ('sales', 'sales_returns') AND isInPeriod(json_extract(data, '$.date'), ?) = 1").iterate(period);
+    const sales = db.prepare(`SELECT json_extract(data, '$.productCode') as code, json_extract(data, '$.productName') as name, CAST(REPLACE(json_extract(data, '$.quantity'), ',', '') AS REAL) as qty, CAST(json_extract(data, '$.price') AS REAL) as price, CAST(json_extract(data, '$.totalPrice') AS REAL) as totalPrice, json_extract(data, '$.invoiceCode') as invCode, json_extract(data, '$.date') as date, f.module_type FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type IN ('sales', ${netMode ? "'sales_returns'" : "'sales'"}) AND isInPeriod(json_extract(data, '$.date'), ?) = 1`).iterate(period);
 
     // Dictionaries for aggregation
     const productStats: Record<string, { qty: number, amt: number, code: string, name: string, l1: string, l2: string, invoices: Set<string> }> = {};
@@ -1076,6 +1744,7 @@ app.get("/api/reports/pareto", (req, res) => {
 app.get("/api/reports/weekly", (req, res) => {
   try {
     const period = (req.query.period as string) || "";
+    const netMode = req.query.netMode !== 'false';
     
     // 1. Get products for mapping
     const products = db.prepare("SELECT json_extract(data, '$.productCode') as code, json_extract(data, '$.productName') as name, json_extract(data, '$.mainGroup') as mainGrp, json_extract(data, '$.subGroup') as subGrp, json_extract(data, '$.activityCenter') as ac FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type = 'products'").iterate();
@@ -1376,11 +2045,11 @@ app.get("/api/reports/inventory", (req, res) => {
     const period = (req.query.period as string) || "";
     let currentStock = 0;
 
-    const aggregateQty = (modType: string, multiplier: number) => {
+    const aggregateQty = (modType: string, multiplier: number, qtyField: string = '$.quantity') => {
       const dbres = db
         .prepare(
           `
-        SELECT SUM(CAST(json_extract(data, '$.quantity') AS REAL)) as totalQty
+        SELECT SUM(CAST(REPLACE(json_extract(data, '${qtyField}'), ',', '') AS REAL)) as totalQty
         FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type = ?
         AND isInPeriod(json_extract(data, '$.date'), ?) = 1
       `,
@@ -1394,6 +2063,7 @@ app.get("/api/reports/inventory", (req, res) => {
     aggregateQty("sales", -1);
     aggregateQty("purchase_returns", -1);
     aggregateQty("sales_returns", 1);
+    aggregateQty("inventory_adjustments", 1, '$.adjustmentQuantity');
 
     // Advanced Supplier & Logistics Returns Analysis
     const products = db.prepare("SELECT json_extract(data, '$.productCode') as code, json_extract(data, '$.productName') as name, json_extract(data, '$.mainGroup') as mainGrp, json_extract(data, '$.subGroup') as subGrp FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type = 'products'").iterate();
@@ -1435,12 +2105,94 @@ app.get("/api/reports/inventory", (req, res) => {
     const L2Arr = Object.values(retL2).sort((a:any,b:any) => b.amt - a.amt);
     const pArr = Object.values(retProducts).sort((a:any,b:any) => b.amt - a.amt);
 
+    // Suppliers Analysis
+    const supplierStats: Record<string, any> = {};
+    const purchasesIt = db.prepare("SELECT json_extract(data, '$.supplier') as supplier, json_extract(data, '$.productCode') as code, CAST(REPLACE(json_extract(data, '$.quantity'), ',', '') AS REAL) as qty, CAST(json_extract(data, '$.price') AS REAL) as price, CAST(json_extract(data, '$.totalPrice') AS REAL) as totalPrice FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type = 'purchases' AND isInPeriod(json_extract(data, '$.date'), ?) = 1").iterate(period);
+
+    for (const p of purchasesIt) {
+       const row = p as any;
+       const supplier = row.supplier || 'نامشخص';
+       if (!supplierStats[supplier]) {
+           supplierStats[supplier] = { name: supplier, purchQty: 0, purchAmt: 0, retQty: 0, retAmt: 0 };
+       }
+       const q = row.qty || 0;
+       let amt = 0; if (row.totalPrice != null && !Number.isNaN(row.totalPrice)) { amt = row.totalPrice; } else { amt = q * (row.price || 0); }
+       supplierStats[supplier].purchQty += q;
+       supplierStats[supplier].purchAmt += amt;
+    }
+
+    const purchReturnsFull = db.prepare("SELECT json_extract(data, '$.supplier') as supplier, json_extract(data, '$.productCode') as code, CAST(REPLACE(json_extract(data, '$.quantity'), ',', '') AS REAL) as qty, CAST(json_extract(data, '$.price') AS REAL) as price, CAST(json_extract(data, '$.totalPrice') AS REAL) as totalPrice FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type = 'purchase_returns' AND isInPeriod(json_extract(data, '$.date'), ?) = 1").iterate(period);
+
+    for (const pr of purchReturnsFull) {
+       const row = pr as any;
+       const supplier = row.supplier || 'نامشخص';
+       if (!supplierStats[supplier]) {
+           supplierStats[supplier] = { name: supplier, purchQty: 0, purchAmt: 0, retQty: 0, retAmt: 0 };
+       }
+       const q = row.qty || 0;
+       let amt = 0; if (row.totalPrice != null && !Number.isNaN(row.totalPrice)) { amt = row.totalPrice; } else { amt = q * (row.price || 0); }
+       supplierStats[supplier].retQty += q;
+       supplierStats[supplier].retAmt += amt;
+    }
+
+    const supplierArr = Object.values(supplierStats).map((s:any) => ({
+       ...s,
+       netPurchAmt: s.purchAmt - s.retAmt
+    })).sort((a,b) => b.netPurchAmt - a.netPurchAmt);
+
+    // Cardex and Velocity
+    const productStats: Record<string, any> = {};
+    const initProdStat = (code: string) => {
+        if (!productStats[code]) {
+            productStats[code] = { 
+                code, 
+                name: pMap[code]?.name || code, 
+                openQty: 0, purchQty: 0, pRetQty: 0, salesQty: 0, sRetQty: 0, adjQty: 0 
+            };
+        }
+    };
+
+    const runQtyQuery = (modType: string, field: string, qtyField: string = '$.quantity') => {
+        const iter = db.prepare(`SELECT json_extract(data, '$.productCode') as code, CAST(REPLACE(json_extract(data, '${qtyField}'), ',', '') AS REAL) as qty FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type = ? AND isInPeriod(json_extract(data, '$.date'), ?) = 1`).iterate(modType, period);
+        for (const row of iter) {
+            const code = (row as any).code || 'unknown';
+            initProdStat(code);
+            productStats[code][field] += ((row as any).qty || 0);
+        }
+    };
+    runQtyQuery('opening_inventory', 'openQty');
+    runQtyQuery('purchases', 'purchQty');
+    runQtyQuery('purchase_returns', 'pRetQty');
+    runQtyQuery('sales', 'salesQty');
+    runQtyQuery('sales_returns', 'sRetQty');
+    runQtyQuery('inventory_adjustments', 'adjQty', '$.adjustmentQuantity');
+
+    const cardexArr = Object.values(productStats).map((p:any) => ({
+        code: p.code,
+        name: p.name,
+        openQty: p.openQty,
+        enteredQty: p.purchQty + p.sRetQty + (p.adjQty > 0 ? p.adjQty : 0),
+        exitedQty: p.salesQty + p.pRetQty + (p.adjQty < 0 ? Math.abs(p.adjQty) : 0),
+        adjQty: p.adjQty,
+        balance: p.openQty + p.purchQty - p.salesQty - p.pRetQty + p.sRetQty + p.adjQty
+    })).sort((a,b) => b.balance - a.balance);
+
+    const velocityArr = Object.values(productStats).map((p:any) => {
+        const balance = p.openQty + p.purchQty - p.salesQty - p.pRetQty + p.sRetQty + p.adjQty;
+        return {
+            code: p.code,
+            name: p.name,
+            salesQty: p.salesQty,
+            balance: balance,
+            turnoverRatio: balance > 0 ? Number((p.salesQty / balance).toFixed(2)) : (p.salesQty > 0 ? 999 : 0)
+        };
+    }).sort((a,b) => b.salesQty - a.salesQty);
+
     res.json({
       currentStock,
-      unitControlArr: [],
-      supplierArr: [],
-      velocityArr: [],
-      wastageArr: [],
+      cardexArr,
+      supplierArr,
+      velocityArr,
       retL1: L1Arr,
       retL2: L2Arr,
       retProducts: pArr
@@ -1468,95 +2220,135 @@ app.get("/api/reports/profit", (req, res) => {
        if (row.code) pMap[row.code] = { name: row.name || "نامشخص", l1: row.mainGrp || "سایر", l2: row.subGrp || "سایر", unit: "عدد" }; 
     }
 
-    const salesIter = db.prepare(`SELECT 
+    const txIter = db.prepare(`SELECT 
       json_extract(data, '$.date') as date,
+      json_extract(data, '$.time') as time,
       json_extract(data, '$.productCode') as code,
       json_extract(data, '$.productName') as productName,
       CAST(REPLACE(json_extract(data, '$.quantity'), ',', '') AS REAL) as qty,
+      CAST(REPLACE(json_extract(data, '$.adjustmentQuantity'), ',', '') AS REAL) as adjQty,
       CAST(REPLACE(json_extract(data, '$.price'), ',', '') AS REAL) as price,
-      CAST(REPLACE(json_extract(data, '$.costPrice'), ',', '') AS REAL) as costPrice,
-      CAST(REPLACE(json_extract(data, '$.lastPurchasePrice'), ',', '') AS REAL) as lastPurchasePrice,
-      f.module_type
+      CAST(REPLACE(json_extract(data, '$.totalPrice'), ',', '') AS REAL) as totalPrice,
+      f.module_type,
+      isInPeriod(json_extract(data, '$.date'), ?) as inPeriod
       FROM raw_data r JOIN files f ON r.file_id = f.id 
-      WHERE f.module_type IN ('sales', 'sales_returns') AND isInPeriod(json_extract(data, '$.date'), ?) = 1`).iterate(period);
+      WHERE f.module_type IN ('opening_inventory', 'purchases', 'purchase_returns', 'sales', 'sales_returns', 'inventory_adjustments') 
+      ORDER BY date ASC, time ASC`).iterate(period);
 
     const transactionRows: any[] = [];
-    for (const s of salesIter) {
+    const prodState: Record<string, { qty: number, totalCost: number, lastPurchasePrice: number }> = {};
+
+    for (const s of txIter) {
        const row = s as any;
        if (!row.date || !row.code) continue;
-       if (exactDate && row.date !== exactDate) continue;
-       if (startDate && row.date < startDate) continue;
-       if (endDate && row.date > endDate) continue;
-       
-       let pInfo = pMap[row.code];
+       const code = row.code;
+
+       if (!prodState[code]) {
+           prodState[code] = { qty: 0, totalCost: 0, lastPurchasePrice: 0 };
+       }
+
+       let pInfo = pMap[code];
        if (!pInfo) pInfo = { name: row.productName || "نامشخص", l1: "سایر", l2: "سایر", unit: "عدد" };
 
-       let qty = row.qty || 0;
-       if (row.module_type === "sales_returns") qty = -qty;
-
+       let rawQty = row.qty || 0;
+       if (row.module_type === 'inventory_adjustments') {
+           rawQty = row.adjQty || 0;
+       }
        const p = row.price || 0;
-       const cp = row.costPrice || 0;
-       const lpp = row.lastPurchasePrice || 0;
-       
-       let isProfit = false;
-       let isLoss = false;
-       let isBreakeven = false;       
-       let profitLossPerUnit = 0;
-       
-       if (cp > 0 && lpp > 0) {
-           if (p < cp && p < lpp) {
-               isLoss = true;
-               profitLossPerUnit = p - lpp; 
-           } else if (p > cp && p > lpp) {
-               isProfit = true;
-               profitLossPerUnit = p - Math.max(cp, lpp); 
+       let totalP = row.totalPrice || (p * rawQty);
+
+       // MWA Calculation
+       if (row.module_type === 'opening_inventory' || row.module_type === 'purchases') {
+           prodState[code].qty += rawQty;
+           prodState[code].totalCost += totalP;
+           if (p > 0) prodState[code].lastPurchasePrice = p;
+       } else if (row.module_type === 'purchase_returns') {
+           prodState[code].qty -= rawQty;
+           prodState[code].totalCost -= totalP;
+       } else if (row.module_type === 'inventory_adjustments') {
+           prodState[code].qty += rawQty;
+           // Estimate the cost based on previous MWA for the adjustment amount
+           let cp = prodState[code].qty > 0 ? (prodState[code].totalCost / prodState[code].qty) : 0;
+           prodState[code].totalCost += (rawQty * cp);
+       } else if (row.module_type === 'sales' || row.module_type === 'sales_returns') {
+           let cp = prodState[code].qty > 0 ? (prodState[code].totalCost / prodState[code].qty) : 0;
+           let lpp = prodState[code].lastPurchasePrice;
+
+           let qty = rawQty;
+           if (row.module_type === "sales_returns") {
+               qty = -qty;
+               prodState[code].qty += rawQty;
+               prodState[code].totalCost += (rawQty * cp);
            } else {
-               isBreakeven = true;
+               prodState[code].qty -= rawQty;
+               prodState[code].totalCost -= (rawQty * cp);
+           }
+
+           // Only push to output if it's in the requested period/date
+           if (row.inPeriod !== 1) continue;
+
+           // Normalize date for comparison (add leading zeros)
+           let nDate = row.date || "";
+           const dMatch = nDate.match(/(\d{4})[\/-](\d{1,2})([\/-](\d{1,2}))?/);
+           if (dMatch) {
+               nDate = `${dMatch[1]}/${dMatch[2].padStart(2, '0')}/${(dMatch[4] || '1').padStart(2, '0')}`;
+           }
+
+           if (exactDate && nDate !== exactDate) continue;
+           if (startDate && nDate < startDate) continue;
+           if (endDate && nDate > endDate) continue;
+
+           let isProfit = false;
+           let isLoss = false;
+           let isBreakeven = false;       
+           let profitLossPerUnit = 0;
+           
+           if (cp > 0 && lpp > 0) {
+               if (p < cp && p < lpp) {
+                   isLoss = true;
+                   profitLossPerUnit = p - cp; // Use MWA for actual loss value, or you can use max(cp, lpp)
+               } else if (p > cp) {
+                   isProfit = true;
+                   profitLossPerUnit = p - cp; 
+               } else {
+                   isBreakeven = true;
+                   profitLossPerUnit = 0; // neither pure profit nor pure loss based on strict rules
+               }
+           } else if (cp > 0) {
+               if (p < cp) {
+                   // isLoss = true; // Wait, rules said ONLY if < lpp AND < cp
+                   isBreakeven = true;
+                   profitLossPerUnit = 0;
+               } else if (p > cp) {
+                   isProfit = true;
+                   profitLossPerUnit = p - cp;
+               } else {
+                   isBreakeven = true;
+                   profitLossPerUnit = 0;
+               }
+           } else {
+               isBreakeven = true; 
                profitLossPerUnit = 0;
            }
-       } else if (cp > 0) {
-           if (p < cp) {
-               isLoss = true;
-               profitLossPerUnit = p - cp;
-           } else if (p > cp) {
-               isProfit = true;
-               profitLossPerUnit = p - cp;
-           } else {
-               isBreakeven = true;
-           }
-       } else if (lpp > 0) {
-           if (p < lpp) {
-               isLoss = true;
-               profitLossPerUnit = p - lpp;
-           } else if (p > lpp) {
-               isProfit = true;
-               profitLossPerUnit = p - lpp;
-           } else {
-               isBreakeven = true;
-           }
-       } else {
-           isBreakeven = true; 
-       }
-       
-       const totalProfitLossRaw = profitLossPerUnit * qty;
-       // let status = isLoss ? "loss" : (isProfit ? "profit" : "breakeven");
+           
+           const totalProfitLossRaw = profitLossPerUnit * qty;
 
-       transactionRows.push({
-           date: row.date,
-           code: row.code,
-           name: pInfo.name,
-           unit: pInfo.unit,
-           qty: qty,
-           price: p,
-           costPrice: cp,
-           lastPurchasePrice: lpp,
-           totalSales: p * qty,
-           profitLossPerUnit: profitLossPerUnit,
-           totalProfitLoss: totalProfitLossRaw,
-           // status: status,
-           l1: pInfo.l1,
-           l2: pInfo.l2
-       });
+           transactionRows.push({
+               date: row.date,
+               code: code,
+               name: pInfo.name,
+               unit: pInfo.unit,
+               qty: qty,
+               price: p,
+               costPrice: cp,
+               lastPurchasePrice: lpp,
+               totalSales: p * qty,
+               profitLossPerUnit: profitLossPerUnit,
+               totalProfitLoss: totalProfitLossRaw,
+               l1: pInfo.l1,
+               l2: pInfo.l2
+           });
+       }
     }
 
     const dayRowsMap: Record<string, any> = {};
@@ -1625,7 +2417,7 @@ app.get("/api/reports/finance", (req, res) => {
     SELECT 
       SUM(CASE WHEN json_extract(data, '$.transactionType') LIKE '%خروج%' OR CAST(json_extract(data, '$.amount') AS REAL) < 0 THEN ABS(CAST(json_extract(data, '$.amount') AS REAL)) ELSE 0 END) as outcome,
       SUM(CASE WHEN NOT (json_extract(data, '$.transactionType') LIKE '%خروج%' OR CAST(json_extract(data, '$.amount') AS REAL) < 0) THEN ABS(CAST(json_extract(data, '$.amount') AS REAL)) ELSE 0 END) as income
-    FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type = 'finance'
+    FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type IN ('finance_cash', 'finance_bank')
     AND isInPeriod(json_extract(data, '$.date'), ?) = 1
   `,
     )
@@ -1665,6 +2457,7 @@ app.get("/api/export-excel", (req, res) => {
 
 app.get("/api/reports/hr", (req, res) => {
   const period = (req.query.period as string) || "";
+  const scanCalcMethod = (req.query.scanCalcMethod as string) || "hr";
   
   // 1. Fetch Sales Data for efficiency (cashier performance)
   const salesRows = db
@@ -1720,7 +2513,11 @@ app.get("/api/reports/hr", (req, res) => {
         workingHours: 0,
         missingExit: 0,
         lateArrivals: 0, // hypothetical logic: entered after 09:00
-        overtimeHours: 0 // > 8h / day
+        overtimeHours: 0, // > 8h / day
+        activeDates: new Set(),
+        activeHours: new Set(),
+        dailyFirstScan: {} as Record<string, string>,
+        dailyLastScan: {} as Record<string, string>
       };
     }
   };
@@ -1767,6 +2564,22 @@ app.get("/api/reports/hr", (req, res) => {
     employeeStats[code].salesQty += (s.qty || 0);
     employeeStats[code].salesValue += ((s.qty || 0) * (s.price || 0));
     if (s.invCode) employeeStats[code].invoiceCount.add(s.invCode);
+
+    if (s.date) {
+        employeeStats[code].activeDates.add(s.date);
+        if (s.time) {
+            const timeStr = String(s.time).padStart(5, '0'); // ensure HH:mm
+            const hour = timeStr.split(':')[0];
+            employeeStats[code].activeHours.add(`${s.date}-${hour}`);
+            
+            if (!employeeStats[code].dailyFirstScan[s.date] || timeStr < employeeStats[code].dailyFirstScan[s.date]) {
+                employeeStats[code].dailyFirstScan[s.date] = timeStr;
+            }
+            if (!employeeStats[code].dailyLastScan[s.date] || timeStr > employeeStats[code].dailyLastScan[s.date]) {
+                employeeStats[code].dailyLastScan[s.date] = timeStr;
+            }
+        }
+    }
   }
 
   // Overall Org Stats
@@ -1804,13 +2617,37 @@ app.get("/api/reports/hr", (req, res) => {
     const commAmt = emp.salesScans; // we will multiply by rate in frontend
     
     // efficiency stats
+    let calculatedHours = 0;
+    if (scanCalcMethod === 'hr') {
+        calculatedHours = emp.workingHours;
+        if (calculatedHours === 0 && emp.activeDates.size > 0) {
+            calculatedHours = emp.activeDates.size * 8; // fallback
+        }
+    } else if (scanCalcMethod === 'first_last') {
+        for (const d of emp.activeDates) {
+            const start = emp.dailyFirstScan[d];
+            const end = emp.dailyLastScan[d];
+            if (start && end) {
+                const [sh, sm] = start.split(':').map(Number);
+                const [eh, em] = end.split(':').map(Number);
+                if (!isNaN(sh) && !isNaN(eh)) {
+                    let diff = (eh - sh) + (em - sm) / 60;
+                    if (diff < 0.5) diff = 0.5; // minimum 30 mins
+                    calculatedHours += diff;
+                }
+            }
+        }
+    } else if (scanCalcMethod === 'active_hours') {
+        calculatedHours = emp.activeHours.size;
+    } else if (scanCalcMethod === 'fixed_shift') {
+        calculatedHours = emp.activeDates.size * 8;
+    }
+
+    let itemsPerHour = 0;
     let itemsPerMinute = 0;
-    if (emp.workingHours > 0) {
-      itemsPerMinute = emp.salesScans / (emp.workingHours * 60);
-    } else if (emp.workingDays === 0 && emp.salesScans > 0) {
-       // if no hr records but they sold, estimate 8 hours a day for days they sold
-       // This is a naive fallback if HR data isn't provided
-       itemsPerMinute = emp.salesScans / (8 * 60); 
+    if (calculatedHours > 0) {
+        itemsPerHour = emp.salesScans / calculatedHours;
+        itemsPerMinute = itemsPerHour / 60;
     }
 
     // Determine performance score dynamically based on items per minute vs an expected baseline (e.g. 10 items/min is standard)
@@ -1836,6 +2673,7 @@ app.get("/api/reports/hr", (req, res) => {
       lateArrivals: emp.lateArrivals,
       overtimeHours: Number(emp.overtimeHours.toFixed(1)),
       missingExit: emp.missingExit,
+      itemsPerHour: Number(itemsPerHour.toFixed(2)),
       itemsPerMinute: Number(itemsPerMinute.toFixed(2)),
       perfScore: Number(avgPerf.toFixed(1)),
       basketSize: emp.invoiceCount.size > 0 ? Number((emp.salesQty / emp.invoiceCount.size).toFixed(1)) : 0,
@@ -2172,6 +3010,233 @@ app.delete("/api/files/:id", (req, res) => {
   // Delete from DB (CASCADE will handle raw_data)
   db.prepare("DELETE FROM files WHERE id = ?").run(fileId);
   res.json({ message: "فایل حذف شد." });
+});
+
+// ================= BUDGET APIs ================= //
+app.get("/api/budgets", (req, res) => {
+    try {
+        const period = (req.query.period as string) || "";
+        const budgets = db.prepare("SELECT * FROM budgets WHERE period = ? OR ? = '' ORDER BY id DESC").all(period);
+        res.json(budgets);
+    } catch (e) {
+        res.status(500).json({ error: "Failed to get budgets" });
+    }
+});
+
+app.post("/api/budgets", (req, res) => {
+    try {
+        const { period, category, type, amount, title, description } = req.body;
+        const result = db.prepare(`
+            INSERT INTO budgets (period, category, type, amount, title, description)
+            VALUES (?, ?, ?, ?, ?, ?)
+        `).run(period, category, type, amount, title, description || "");
+        res.json({ id: result.lastInsertRowid });
+    } catch (e) {
+        console.error(e);
+        res.status(500).json({ error: "Failed to create budget" });
+    }
+});
+
+app.delete("/api/budgets/:id", (req, res) => {
+    try {
+        db.prepare("DELETE FROM budgets WHERE id = ?").run(req.params.id);
+        res.json({ success: true });
+    } catch (e) {
+        res.status(500).json({ error: "Failed to delete budget" });
+    }
+});
+
+app.get("/api/reports/budget-variance", (req, res) => {
+    try {
+        const period = (req.query.period as string) || "";
+        if (!period) {
+             return res.json({ varianceList: [], totals: {} });
+        }
+
+        const budgets = db.prepare("SELECT * FROM budgets WHERE period = ?").all(period) as any[];
+
+        // Actual values calculation based on module_type and category matching
+        // Simple logic: we'll aggregate actuals matching the budget type/category
+        const actualSalesQuery = db.prepare("SELECT CAST(REPLACE(json_extract(data, '$.totalPrice'), ',', '') AS REAL) as total, json_extract(data, '$.productName') as pName, json_extract(data, '$.productCode') as pCode, json_extract(data, '$.category') as cat FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type = 'sales' AND isInPeriod(json_extract(data, '$.date'), ?) = 1").iterate(period);
+        
+        const actualPurchasesQuery = db.prepare("SELECT CAST(REPLACE(json_extract(data, '$.totalPrice'), ',', '') AS REAL) as total, json_extract(data, '$.productName') as pName, json_extract(data, '$.productCode') as pCode, json_extract(data, '$.category') as cat FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type = 'purchases' AND isInPeriod(json_extract(data, '$.date'), ?) = 1").iterate(period);
+
+        const actualFinanceQuery = db.prepare("SELECT CAST(REPLACE(json_extract(data, '$.amount'), ',', '') AS REAL) as total, json_extract(data, '$.category') as cat FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type = 'finance_expense' AND isInPeriod(json_extract(data, '$.date'), ?) = 1").iterate(period);
+
+        let totalSales = 0;
+        let totalPurchases = 0;
+        let totalExpenses = 0;
+
+        for (const row of actualSalesQuery) { totalSales += (row as any).total || 0; }
+        for (const row of actualPurchasesQuery) { totalPurchases += (row as any).total || 0; }
+        for (const row of actualFinanceQuery) { totalExpenses += (row as any).total || 0; }
+
+        const varianceList = budgets.map(b => {
+             let actual = 0;
+             if (b.type === "فروش (درآمد)") actual = totalSales; // Very simplified, ideally match category exactly
+             if (b.type === "تامین (خرید)") actual = totalPurchases;
+             if (b.type === "هزینه‌های عملیاتی") actual = totalExpenses;
+
+             // Let's refine based on category string matching if possible, otherwise use total
+             let variance = actual - b.amount;
+             let variancePercent = b.amount > 0 ? (actual / b.amount) * 100 : 0;
+             
+             let status = "On Track";
+             if (b.type === "فروش (درآمد)") {
+                  status = variance >= 0 ? "Under Budget (Good)" : "Under Budget (Bad)"; // wait, for income, positive variance is good
+                  status = variance >= 0 ? "بالاتر از هدف (مطلوب)" : "کمتر از هدف (نامطلوب)";
+             } else {
+                  status = variance <= 0 ? "زیر بودجه (مطلوب)" : "مازاد بودجه (نامطلوب)";
+             }
+
+             return {
+                 id: b.id,
+                 title: b.title,
+                 type: b.type,
+                 category: b.category,
+                 budgetAmount: b.amount,
+                 actualAmount: actual,
+                 varianceAmount: variance,
+                 variancePercent: variancePercent,
+                 status
+             };
+        });
+
+        res.json({ varianceList });
+    } catch (e) {
+        console.error(e);
+        res.status(500).json({ error: "Failed to generate budget variance report" });
+    }
+});
+
+// Advanced Reports Endpoints (Added)
+app.get("/api/reports/forecast", (req, res) => {
+    try {
+        const period = (req.query.period as string) || "";
+        // Very basic forecasting logic based on daily sales trends
+        const salesData = db.prepare("SELECT json_extract(data, '$.date') as date, SUM(CAST(REPLACE(json_extract(data, '$.totalPrice'), ',', '') AS REAL)) as dailyTotal FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type = 'sales' AND isInPeriod(json_extract(data, '$.date'), ?) = 1 GROUP BY date ORDER BY date ASC").all(period) as any[];
+        
+        let movingAverage = 0;
+        let sum = 0;
+        let points = 0;
+        const trendData = salesData.map((d, i) => {
+            sum += d.dailyTotal;
+            points++;
+            movingAverage = sum / points;
+            return {
+               date: d.date,
+               actual: d.dailyTotal,
+               forecast: i > 2 ? movingAverage * 1.05 : null // slight growth trend assumption
+            }
+        });
+
+        const futureForecast = [];
+        let lastAvg = movingAverage;
+        for (let i = 1; i <= 7; i++) {
+            lastAvg = lastAvg * 1.02; // slight upward trend
+            futureForecast.push({
+                day: `Day +${i}`,
+                projectedSales: lastAvg
+            });
+        }
+
+        res.json({ trendData, futureForecast });
+    } catch (e) {
+        console.error(e);
+        res.status(500).json({ error: "Failed to generate forecast" });
+    }
+});
+
+app.get("/api/reports/breakeven", (req, res) => {
+    try {
+        const period = (req.query.period as string) || "";
+        
+        // Sum total fixed costs (using finance_expense module where expenseType is fixed)
+        const expenses = db.prepare("SELECT SUM(CAST(REPLACE(json_extract(data, '$.amount'), ',', '') AS REAL)) as total FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type = 'finance_expense' AND (json_extract(data, '$.expenseType') = 'ثابت' OR json_extract(data, '$.expenseType') IS NULL) AND isInPeriod(json_extract(data, '$.date'), ?) = 1").get(period) as any;
+        const fixedCosts = expenses?.total || 0;
+
+        // Get aggregate sales and purchase to find average Contribution Margin Ratio
+        const sales = db.prepare("SELECT SUM(CAST(REPLACE(json_extract(data, '$.totalPrice'), ',', '') AS REAL)) as total FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type = 'sales' AND isInPeriod(json_extract(data, '$.date'), ?) = 1").get(period) as any;
+        const totalSales = sales?.total || 0;
+
+        const purchases = db.prepare("SELECT SUM(CAST(REPLACE(json_extract(data, '$.totalPrice'), ',', '') AS REAL)) as total FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type = 'purchases' AND isInPeriod(json_extract(data, '$.date'), ?) = 1").get(period) as any;
+        const totalCOGS = purchases?.total || 0;
+
+        let cmRatio = 0.3; // Default 30% margin if no data
+        if (totalSales > 0 && totalCOGS < totalSales) {
+            cmRatio = (totalSales - totalCOGS) / totalSales;
+        }
+
+        const breakevenPoint = cmRatio > 0 ? fixedCosts / cmRatio : 0;
+        
+        const chartData = [];
+        const step = Math.max(100000, totalSales / 10);
+        for(let i=0; i<= Math.max(totalSales, breakevenPoint) * 1.2; i+=step) {
+            chartData.push({
+                salesVolume: i,
+                totalCost: fixedCosts + (i * (1 - cmRatio)),
+                fixedCost: fixedCosts,
+                revenue: i
+            });
+        }
+
+        res.json({
+            fixedCosts,
+            totalSales,
+            cmRatio,
+            breakevenPoint,
+            isProfitable: totalSales > breakevenPoint,
+            chartData
+        });
+
+    } catch (e) {
+        console.error(e);
+        res.status(500).json({ error: "Failed to generate breakeven analysis" });
+    }
+});
+
+app.get("/api/reports/cost-trends", (req, res) => {
+    try {
+        const period = (req.query.period as string) || "";
+        
+        // Product purchases over time
+        const purchaseData = db.prepare(`
+            SELECT 
+                json_extract(data, '$.date') as date,
+                json_extract(data, '$.productCode') as code,
+                json_extract(data, '$.productName') as name,
+                CAST(REPLACE(json_extract(data, '$.price'), ',', '') AS REAL) as unitPrice
+            FROM raw_data r JOIN files f ON r.file_id = f.id 
+            WHERE f.module_type = 'purchases' AND isInPeriod(json_extract(data, '$.date'), ?) = 1
+            ORDER BY date ASC
+        `).all(period) as any[];
+
+        const trends: Record<string, any[]> = {};
+        for(const p of purchaseData) {
+            if(!trends[p.code]) trends[p.code] = [];
+            trends[p.code].push({
+                date: p.date,
+                name: p.name,
+                price: p.unitPrice
+            });
+        }
+
+        // Just take top 5 most purchased items for trend chart
+        const topCodes = Object.keys(trends)
+            .sort((a, b) => trends[b].length - trends[a].length)
+            .slice(0, 5);
+
+        const series = topCodes.map(code => ({
+            code,
+            name: trends[code][0]?.name || code,
+            data: trends[code]
+        }));
+
+        res.json({ series });
+    } catch (e) {
+        console.error(e);
+        res.status(500).json({ error: "Failed to get cost trends" });
+    }
 });
 
 async function startServer() {

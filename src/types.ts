@@ -100,15 +100,58 @@ export const MODULES: Record<string, ModuleConfig> = {
       { key: "price", label: "نرخ فروش", required: true }
     ]
   },
-  finance: {
-    label: "هزینه و منابع مالی (نقدی/بانکی)",
+  finance_cash: {
+    label: "خزانه‌داری - صندوق (وجوه نقد)",
     fields: [
       { key: "date", label: "تاریخ تراکنش", required: true },
-      { key: "account", label: "سرفصل حساب", required: true },
-      { key: "costCenter", label: "مرکز فعالیت / مرکز هزینه", required: true },
+      { key: "account", label: "سرفصل حساب (صندوق)", required: true },
+      { key: "costCenter", label: "مرکز فعالیت / صندوقدار", required: false },
       { key: "amount", label: "مبلغ", required: true },
       { key: "description", label: "شرح سند", required: false },
-      { key: "transactionType", label: "نوع تراکنش (ورودی/خروجی)", required: true }
+      { key: "transactionType", label: "نوع تراکنش (ورود/خروج)", required: true }
+    ]
+  },
+  finance_bank: {
+    label: "خزانه‌داری - بانک (حساب‌های بانکی)",
+    fields: [
+      { key: "date", label: "تاریخ تراکنش", required: true },
+      { key: "account", label: "سرفصل حساب (بانک)", required: true },
+      { key: "amount", label: "مبلغ", required: true },
+      { key: "description", label: "شرح سند", required: false },
+      { key: "transactionType", label: "نوع تراکنش (ورود/خروج)", required: true }
+    ]
+  },
+  finance_expense: {
+    label: "بهای تمام شده - هزینه‌ها (مراکز فعالیت)",
+    fields: [
+      { key: "date", label: "تاریخ تراکنش", required: true },
+      { key: "account", label: "سرفصل هزینه (معین)", required: true },
+      { key: "costCenter", label: "مرکز فعالیت / هزینه", required: true },
+      { key: "amount", label: "مبلغ هزینه", required: true },
+      { key: "expenseType", label: "رفتار هزینه (ثابت/متغیر)", required: false },
+      { key: "description", label: "شرح سند", required: false }
+    ]
+  },
+  cost_control: {
+    label: "هزینه‌های سازمان (ماژول کنترل هزینه)",
+    fields: [
+      { key: "date", label: "تاریخ تراکنش", required: true },
+      { key: "account", label: "سرفصل هزینه (معین)", required: true },
+      { key: "tafsil", label: "تفصیل هزینه", required: false },
+      { key: "amount", label: "مبلغ هزینه", required: true },
+      { key: "expenseType", label: "رفتار هزینه (ثابت/متغیر)", required: false },
+      { key: "description", label: "شرح سند", required: false }
+    ]
+  },
+  inventory_adjustments: {
+    label: "انبارگردانی و تعدیلات موجودی",
+    fields: [
+      { key: "date", label: "تاریخ انبارگردانی", required: true },
+      { key: "productCode", label: "کد کالا", required: true },
+      { key: "productName", label: "نام کالا", required: false },
+      { key: "countedQuantity", label: "تعداد شمارش شده (واقعی)", required: false },
+      { key: "adjustmentQuantity", label: "مقدار تعدیل (کسری/اضافی)", required: false },
+      { key: "description", label: "شرح / علت تعدیل", required: false }
     ]
   },
   hr: {

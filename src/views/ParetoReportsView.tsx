@@ -10,6 +10,7 @@ export default function ParetoReportsView() {
   const [availablePeriods, setAvailablePeriods] = useState<any[]>([]);
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [netMode, setNetMode] = useState(true);
 
   // Interval Settings
   const [minVal, setMinVal] = useState(0);
@@ -28,7 +29,7 @@ export default function ParetoReportsView() {
     setLoading(true);
     const bins = customBinsStr.split(',').map(s => parseInt(s.trim().replace(/,/g, ''))).filter(n => !isNaN(n));
     const intervalSettings = JSON.stringify({ min: minVal, max: maxVal, step: stepVal, customBins: bins, enabled: true });
-    fetch(`/api/reports/pareto?period=${period}&intervalSettings=${encodeURIComponent(intervalSettings)}`)
+    fetch(`/api/reports/pareto?period=${period}&netMode=${netMode}&intervalSettings=${encodeURIComponent(intervalSettings)}`)
       .then(res => res.json())
       .then(resData => {
         setData(resData);
@@ -42,7 +43,7 @@ export default function ParetoReportsView() {
 
   useEffect(() => {
     fetchData();
-  }, [period]);
+  }, [period, netMode]);
 
   const renderTopBottomLists = (items: any[], valueKey: string, title: string, formatVal: (v:any)=>string) => {
      if (!items || items.length === 0) return null;
@@ -100,7 +101,7 @@ export default function ParetoReportsView() {
                این بخش شامل لیست کالاهایی است که مجموعا ۸۰٪ از {title.includes('ریالی') ? 'فروش ریالی' : 'حجم فروش'} را تشکیل می‌دهند (۲۰٪ برتر کالاها).
                تعداد کل کالاهای کلاس A: <span className="font-bold">{classA.length}</span> مورد.
            </div>
-           <div className="overflow-x-auto max-h-[400px]">
+           <div className="overflow-x-auto max-h-[450px]">
               <table className="w-full text-sm text-right">
                  <thead className="bg-slate-50 sticky top-0 shadow-sm text-slate-600">
                     <tr>
@@ -137,9 +138,9 @@ export default function ParetoReportsView() {
            <div className="h-[550px]">
               <div dir="ltr" className="w-full h-full flex-1 min-h-0 min-w-0">
 <ResponsiveContainer width="100%" height="100%">
-<ComposedChart data={topN} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
+<ComposedChart data={topN} margin={{ top: 20, right: 30, left: 100, bottom: 140 }}>
                     <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
-                    <XAxis dataKey={nameKey} angle={-90} textAnchor="end" height={180} tickFormatter={(v) => v && v.length > 30 ? v.substring(0, 30) + '...' : v} tick={{fontSize: 12, fontWeight: 'bold', dy: 15, dx: -10, fill: '#1e293b'}} interval={0} />
+                    <XAxis dataKey={nameKey} angle={-45} textAnchor="end" height={180} tickFormatter={(v) => v && v.length > 30 ? v.substring(0, 30) + '...' : v} tick={{fontSize: 12, fontWeight: 'bold', dy: 10, dx: -10, fill: '#1e293b'}} interval={0} />
                     <YAxis yAxisId="left" {...defaultYAxisProps} orientation="left" />
                     <YAxis yAxisId="right" {...defaultYAxisProps} />
                     <Tooltip formatter={(val: number, name: string) => [name === 'درصد تجمعی' ? val.toFixed(2) + '%' : val.toLocaleString(), name]} />
@@ -165,6 +166,10 @@ export default function ParetoReportsView() {
           <p className="text-slate-500 text-sm mt-1">شناسایی کالاهای کلیدی و بررسی قانون ۸۰/۲۰</p>
         </div>
         <div className="flex items-center gap-3 bg-white p-2 rounded-lg shadow-sm border border-slate-200">
+          <div className="flex items-center gap-2 px-3 border-r border-slate-200">
+             <input type="checkbox" id="netModePareto" checked={netMode} onChange={e => setNetMode(e.target.checked)} className="rounded text-amber-600 focus:ring-amber-500 w-4 h-4" />
+             <label htmlFor="netModePareto" className="text-xs font-semibold text-slate-600 cursor-pointer select-none">فروش خالص (احتساب برگشتی)</label>
+          </div>
           <ExportPrintButtons moduleName="sales" period={period} fileName="Pareto_Report" />
           <Filter size={18} className="text-slate-400" />
           <AdvancedPeriodFilter value={period} onChange={setPeriod} availableYears={availablePeriods.map((p:any) => p.value.startsWith('Y:') ? p.value.substring(2) : null).filter(Boolean) as string[]} />
@@ -366,7 +371,7 @@ export default function ParetoReportsView() {
                    <div className="h-[450px] mb-8">
                       <div dir="ltr" className="w-full h-full flex-1 min-h-0 min-w-0">
 <ResponsiveContainer width="100%" height="100%">
-<ComposedChart data={data.invoiceClasses} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
+<ComposedChart data={data.invoiceClasses} margin={{ top: 20, right: 30, left: 100, bottom: 140 }}>
                             <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
                             <XAxis dataKey="range" {...defaultXAxisProps}  />
                             <YAxis yAxisId="left" {...defaultYAxisProps} orientation="left" />

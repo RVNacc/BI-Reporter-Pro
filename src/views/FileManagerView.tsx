@@ -23,6 +23,44 @@ export default function FileManagerView() {
     headers: string[];
   } | null>(null);
   const [mappings, setMappings] = useState<Record<string, string>>({});
+  const [staticMappings, setStaticMappings] = useState<Record<string, string>>({});
+
+  
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
+
+  const handleDatabaseRestore = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!confirm("آیا از بازیابی پایگاه داده اطمینان دارید؟ تمام اطلاعات فعلی با اطلاعات فایل جایگزین خواهد شد.")) {
+        e.target.value = "";
+        return;
+    }
+
+    const formData = new FormData();
+    formData.append("file", file);
+    setIsUploading(true);
+
+    try {
+      const res = await fetch("/api/database/import", {
+        method: "POST",
+        body: formData,
+      });
+      const data = await res.json();
+      if (res.ok) {
+        alert("پایگاه داده با موفقیت بازیابی شد. صفحه برای اعمال تغییرات رفرش می‌شود.");
+        window.location.reload();
+      } else {
+        alert(data.error || "خطا در بازیابی پایگاه داده");
+      }
+    } catch (err) {
+      console.error(err);
+      alert("خطا در ارتباط با سرور");
+    } finally {
+      setIsUploading(false);
+      e.target.value = "";
+    }
+  };
 
   const fetchFiles = async () => {
     try {
@@ -63,18 +101,24 @@ export default function FileManagerView() {
         const newMappings: Record<string, string> = {};
         const config = MODULES[selectedModule];
         config.fields.forEach((f) => {
-          const match = data.headers.find(
-            (header: string) => header.trim() === f.label.trim(),
+          let match = data.headers.find(
+            (header: any) => String(header).trim() === f.label.trim(),
           );
+          if (!match) {
+             match = data.headers.find(
+               (header: any) => String(header).trim().includes(f.label.trim()) || f.label.trim().includes(String(header).trim())
+             );
+          }
           if (match) newMappings[f.key] = match;
         });
         setMappings(newMappings);
+        setStaticMappings({});
       } else {
         alert("خطا در پیش‌پردازش فایل.");
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("Upload preview failed", error);
-      alert("خطای سیستم در آپلود.");
+      alert("خطای سیستم در آپلود: " + (error?.message || "نامشخص"));
     } finally {
       setIsUploading(false);
       event.target.value = ""; // reset input
@@ -104,12 +148,15 @@ export default function FileManagerView() {
           originalName: stagedFile.originalName,
           module_type: selectedModule,
           mappings,
+          staticMappings
         }),
       });
       if (res.ok) {
         setStagedFile(null);
         setMappings({});
+        setStaticMappings({});
         fetchFiles();
+        alert("فایل با موفقیت ثبت شد!");
       } else {
         const errObj = await res.json().catch(() => ({}));
         alert("خطا در تایید و ذخیره فایل: " + (errObj?.error || "خطای نامشخص"));
@@ -223,20 +270,33 @@ export default function FileManagerView() {
                     <select
                       className={`w-full border rounded-lg p-2 text-sm outline-none ${!mappings[field.key] && field.required ? "border-amber-400 focus:ring-amber-500" : "border-slate-300 focus:ring-blue-500"}`}
                       value={mappings[field.key] || ""}
-                      onChange={(e) =>
+                      onChange={(e) => {
                         setMappings({
                           ...mappings,
                           [field.key]: e.target.value,
-                        })
-                      }
+                        });
+                        if (e.target.value !== '_STATIC_') {
+                          setStaticMappings({ ...staticMappings, [field.key]: '' });
+                        }
+                      }}
                     >
                       <option value="">-- انتخاب ستون فایل --</option>
+                      <option value="_STATIC_">-- مقدار ثابت (Static) --</option>
                       {stagedFile.headers.map((h) => (
                         <option key={h} value={h}>
                           {h}
                         </option>
                       ))}
                     </select>
+                    {mappings[field.key] === '_STATIC_' && (
+                       <input 
+                         type="text" 
+                         placeholder="مقدار ثابت را وارد کنید..."
+                         className="mt-2 w-full border border-blue-300 rounded-lg p-2 text-sm outline-none focus:ring-blue-500"
+                         value={staticMappings[field.key] || ""}
+                         onChange={(e) => setStaticMappings({ ...staticMappings, [field.key]: e.target.value })}
+                       />
+                    )}
                   </div>
                 ))}
               </div>
@@ -265,6 +325,10 @@ export default function FileManagerView() {
               مدیریت منابع تغذیه شده
             </h2>
             <div className="flex gap-2 items-center">
+               <input type="file" ref={fileInputRef} className="hidden" accept=".db,.sqlite" onChange={handleDatabaseRestore} />
+               <button onClick={() => fileInputRef.current?.click()} className="flex items-center gap-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors border border-rose-200">
+                 بازیابی پایگاه داده
+               </button>
                <a 
                  href="/api/database/export" 
                  download

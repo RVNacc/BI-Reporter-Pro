@@ -1,3 +1,4 @@
+import AdvancedPeriodFilter from "../components/AdvancedPeriodFilter";
 import React, { useState, useEffect } from "react";
 import {
   Calculator,
@@ -17,10 +18,15 @@ export default function CostAllocationView() {
   const [reportData, setReportData] = useState<any>(null);
   const [viewLevel, setViewLevel] = useState<'level_1' | 'level_2'>('level_2');
   const [isSyncing, setIsSyncing] = useState(false);
+  const [salesPeriod, setSalesPeriod] = useState("");
+  const [costPeriod, setCostPeriod] = useState("");
+  const [netMode, setNetMode] = useState(true);
+  const [periods, setPeriods] = useState<any[]>([]);
 
   const [newName, setNewName] = useState("");
   const [newBase, setNewBase] = useState("sales_value");
   const [newCost, setNewCost] = useState("");
+  const [newLevel, setNewLevel] = useState<'level_1' | 'level_2'>('level_1');
 
   const [availableCategories, setAvailableCategories] = useState<string[]>([]);
   const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
@@ -28,6 +34,15 @@ export default function CostAllocationView() {
   
   const [editingTargetId, setEditingTargetId] = useState<number | null>(null);
   const [editingTargetCategories, setEditingTargetCategories] = useState<string[]>([]);
+  const [editingSourceAccountsId, setEditingSourceAccountsId] = useState<number | null>(null);
+  const [editingSourceAccounts, setEditingSourceAccounts] = useState<string[]>([]);
+  const [editingChartSourceAccountsId, setEditingChartSourceAccountsId] = useState<number | null>(null);
+  
+  const [globalSourceAccountsOpen, setGlobalSourceAccountsOpen] = useState(false);
+  const [globalSourceAccounts, setGlobalSourceAccounts] = useState<string[]>([]);
+
+  const [chartPage, setChartPage] = useState(1);
+  const chartsPerPage = 12;
 
   const fetchCenters = async () => {
     try {
@@ -36,9 +51,27 @@ export default function CostAllocationView() {
     } catch (e) {}
   };
 
+  const fetchPeriods = async () => {
+    try {
+      const res = await fetch("/api/periods");
+      if (res.ok) {
+          const data = await res.json();
+          setPeriods(data);
+          // Auto-select latest period if none selected
+          if (!salesPeriod && data.length > 0) {
+              // we don't auto select to avoid overriding manual selection, but it's okay
+          }
+      }
+    } catch(e) {}
+  };
+
   const fetchReport = async () => {
     try {
-      const res = await fetch("/api/reports/cost-allocation");
+      const query = new URLSearchParams();
+      if (salesPeriod) query.append("salesPeriod", salesPeriod);
+      if (costPeriod) query.append("costPeriod", costPeriod);
+      query.append("netMode", netMode.toString());
+      const res = await fetch("/api/reports/cost-allocation?" + query.toString());
       if (res.ok) setReportData(await res.json());
     } catch (e) {}
   };
@@ -52,9 +85,13 @@ export default function CostAllocationView() {
 
   useEffect(() => {
     fetchCenters();
-    fetchReport();
     fetchCategories();
+    fetchPeriods();
   }, []);
+
+  useEffect(() => {
+    fetchReport();
+  }, [salesPeriod, costPeriod, netMode]);
 
   const handleAddCenter = async () => {
     if (!newName || !newCost) return;
@@ -65,6 +102,7 @@ export default function CostAllocationView() {
         body: JSON.stringify({
           name: newName,
           allocation_base: newBase,
+          allocation_level: newLevel,
           total_cost: parseFloat(newCost),
           target_categories: selectedCategories.join(","),
         }),
@@ -72,6 +110,7 @@ export default function CostAllocationView() {
       setNewName("");
       setNewCost("");
       setSelectedCategories([]);
+      setNewLevel('level_1');
       setCatDropdownOpen(false);
       fetchCenters();
       fetchReport(); // Refresh report
@@ -133,9 +172,11 @@ export default function CostAllocationView() {
     time_spent: "زمان صرف شده (ساعت)",
   };
 
+  const displayCenters = reportData?.costCenters || costCenters;
+  
   return (
     <div className="p-8 h-full flex flex-col justify-start overflow-auto print:overflow-visible print:h-auto print:p-2 print:block">
-      <div className="mb-6 flex justify-between items-start">
+      <div className="mb-6 flex flex-col md:flex-row justify-between md:items-start gap-4">
         <div>
           <h1 className="text-2xl font-bold text-slate-800 mb-2 border-r-4 border-amber-500 pr-3">
             بهابای تمام شده مبتنی بر فعالیت (ABC)
@@ -145,7 +186,26 @@ export default function CostAllocationView() {
             سود واقعی
           </p>
         </div>
-          <ExportPrintButtons moduleName="sales" period="" fileName="Cost_Allocation" />
+        
+        <div className="flex flex-wrap items-center gap-4 bg-white p-3 rounded-xl border border-slate-200 shadow-sm">
+           <div className="flex flex-col gap-1">
+              <span className="text-[11px] font-bold text-slate-500">دوره هزینه‌ها (Finance):</span>
+              <AdvancedPeriodFilter value={costPeriod} onChange={setCostPeriod} availableYears={periods.map((p:any) => p.value.startsWith('Y:') ? p.value.substring(2) : null).filter(Boolean) as string[]} />
+           </div>
+           <div className="flex flex-col gap-1">
+              <span className="text-[11px] font-bold text-slate-500">دوره فروش/تسهیم (Sales):</span>
+              <AdvancedPeriodFilter value={salesPeriod} onChange={setSalesPeriod} availableYears={periods.map((p:any) => p.value.startsWith('Y:') ? p.value.substring(2) : null).filter(Boolean) as string[]} />
+           </div>
+           
+           <div className="flex flex-col justify-end gap-1 self-stretch pb-0.5">
+              <ExportPrintButtons moduleName="cost_allocation" period="" fileName="Cost_Allocation" />
+           </div>
+           
+           <div className="flex items-center gap-2 pr-4 border-r border-slate-200">
+               <input type="checkbox" id="netModeABC" checked={netMode} onChange={e => setNetMode(e.target.checked)} className="rounded text-amber-600 focus:ring-amber-500 w-4 h-4" />
+               <label htmlFor="netModeABC" className="text-xs font-semibold text-slate-600 cursor-pointer">احتساب برگشتی‌ها (خالص)</label>
+           </div>
+        </div>
       </div>
 
       {/* Configurations */}
@@ -180,6 +240,17 @@ export default function CostAllocationView() {
             value={newCost}
             onChange={(e) => setNewCost(e.target.value)}
           />
+          <select
+            className="border rounded-lg p-2.5 flex-1 min-w-[150px] text-sm outline-none focus:ring-2 focus:ring-amber-500"
+            value={newLevel}
+            onChange={(e) => {
+              setNewLevel(e.target.value as 'level_1' | 'level_2');
+              setSelectedCategories([]); // clear selections on level change
+            }}
+          >
+            <option value="level_1">سطح ۱ (گروه اصلی)</option>
+            <option value="level_2">سطح ۲ (زیرگروه)</option>
+          </select>
           <select
             className="border rounded-lg p-2.5 flex-1 min-w-[200px] text-sm outline-none focus:ring-2 focus:ring-amber-500"
             value={newBase}
@@ -234,7 +305,7 @@ export default function CostAllocationView() {
                     ردیف کالایی یافت نشد. ابتدا فایل محصولات را بارگذاری کنید.
                   </div>
                 ) : (
-                  availableCategories.map((cat) => (
+                  availableCategories.filter(cat => (newLevel === 'level_2') ? cat.includes(' - ') : !cat.includes(' - ')).map((cat) => (
                     <label
                       key={cat}
                       className="flex items-center gap-2 p-2 hover:bg-slate-50 cursor-pointer"
@@ -267,157 +338,221 @@ export default function CostAllocationView() {
           </button>
         </div>
 
-        {costCenters.length > 0 && (
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-            {costCenters.map((cc) => {
-              const visualData = reportData?.costCenterVisuals?.find(
-                (v: any) => v.id === cc.id,
-              );
-              const chartData = visualData?.chartData || [];
-              const COLORS = [
-                "#f59e0b",
-                "#3b82f6",
-                "#10b981",
-                "#ef4444",
-                "#8b5cf6",
-              ];
+        {displayCenters.length > 0 && (
+          <div className="flex flex-col gap-4 mb-8">
+            <div className="flex justify-between items-center bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                <h3 className="font-semibold text-slate-700">انتخاب سرفصل هزینه برای مشاهده نمودار جذب</h3>
+                <div className="relative">
+                   <div 
+                      onClick={() => setGlobalSourceAccountsOpen(!globalSourceAccountsOpen)}
+                      className="border border-amber-300 bg-amber-50 rounded-lg px-4 py-2 cursor-pointer hover:bg-amber-100 text-sm flex justify-between items-center text-amber-800 min-w-[250px] shadow-sm transition"
+                   >
+                      <span className="font-medium">
+                         {globalSourceAccounts.length > 0 ? (globalSourceAccounts.length + " سرفصل انتخاب شده") : "همه سرفصل‌ها (اعمال به کل مراکز)"}
+                      </span>
+                      <ChevronDown size={16} />
+                   </div>
+                   {globalSourceAccountsOpen && (
+                      <div className="absolute top-12 left-0 right-0 z-40 bg-white border border-slate-300 rounded-lg shadow-xl p-3 min-w-[250px]">
+                         <div className="max-h-60 overflow-auto custom-scrollbar mb-3 border-b pb-2">
+                           <label className="flex items-center gap-2 p-2 hover:bg-slate-50 cursor-pointer rounded">
+                             <input 
+                                type="checkbox" 
+                                checked={globalSourceAccounts.length === 0}
+                                onChange={() => setGlobalSourceAccounts([])}
+                                className="accent-amber-500 rounded w-4 h-4"
+                             />
+                             <span className="text-sm font-medium text-slate-700">همه سرفصل‌ها (بدون فیلتر)</span>
+                           </label>
+                           {(displayCenters[0]?.available_accounts || []).map((acc: string) => (
+                             <label key={acc} className="flex items-center gap-2 p-2 hover:bg-slate-50 cursor-pointer rounded">
+                               <input 
+                                  type="checkbox" 
+                                  checked={globalSourceAccounts.includes(acc)}
+                                  onChange={(e) => {
+                                     if(e.target.checked) setGlobalSourceAccounts([...globalSourceAccounts, acc]);
+                                     else setGlobalSourceAccounts(globalSourceAccounts.filter(a => a !== acc));
+                                  }}
+                                  className="accent-amber-500 rounded w-4 h-4"
+                               />
+                               <span className="text-sm text-slate-600 truncate">{acc}</span>
+                             </label>
+                           ))}
+                         </div>
+                         <div className="flex gap-2">
+                            <button onClick={() => {
+                               fetch(`/api/cost-centers-bulk/source-accounts`, {
+                                  method: "PUT",
+                                  headers: { "Content-Type": "application/json" },
+                                  body: JSON.stringify({ source_accounts: globalSourceAccounts.join(",") }),
+                               }).then(() => {
+                                  setGlobalSourceAccountsOpen(false);
+                                  fetchCenters();
+                                  fetchReport();
+                               });
+                            }} className="flex-1 bg-amber-500 hover:bg-amber-600 text-white text-sm py-1.5 rounded-lg font-medium transition">اعمال برای همه</button>
+                            <button onClick={() => setGlobalSourceAccountsOpen(false)} className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm py-1.5 rounded-lg font-medium transition">انصراف</button>
+                         </div>
+                      </div>
+                   )}
+                </div>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+              {displayCenters.slice((chartPage - 1) * chartsPerPage, chartPage * chartsPerPage).map((cc: any) => {
+                const visualData = reportData?.costCenterVisuals?.find((v: any) => v.id === cc.id);
+                const chartData = visualData?.chartData || [];
+                const COLORS = ["#f59e0b", "#3b82f6", "#10b981", "#ef4444", "#8b5cf6", "#ec4899", "#06b6d4"];
 
-              return (
-                <div
-                  key={cc.id}
-                  className="border border-slate-200 rounded-xl bg-white shadow-sm overflow-hidden flex flex-col"
-                >
-                  <div className="p-4 border-b border-slate-100 flex justify-between items-start bg-slate-50">
-                    <div>
-                      <h3 className="font-bold text-slate-800 text-lg flex items-center gap-2">
-                        <div className="w-2 h-2 rounded-full bg-amber-500"></div>
-                        {cc.name}
-                      </h3>
-                      <div className="text-sm font-mono text-slate-500 mt-1">
-                        {Number(cc.total_cost).toLocaleString()} ریال
+                return (
+                  <div key={cc.id} className="border border-slate-200 rounded-xl bg-white shadow-sm overflow-hidden flex flex-col h-[350px]">
+                    <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+                      <div>
+                        <h3 className="font-bold text-slate-800 text-lg flex items-center gap-2">
+                          <div className="w-2 h-2 rounded-full bg-amber-500"></div>
+                          {cc.name}
+                        </h3>
+                        <div className="text-sm font-mono text-slate-500 mt-1">
+                          مبلغ کل: {Number(cc.total_cost).toLocaleString()} ریال
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 relative">
+                        {editingChartSourceAccountsId === cc.id ? (
+                           <div className="absolute top-10 left-0 z-30 bg-white border border-slate-300 rounded shadow-lg p-2 min-w-[200px]">
+                              <div className="max-h-40 overflow-auto custom-scrollbar mb-2 border-b pb-2">
+                                <label className="flex items-center gap-2 p-1.5 hover:bg-slate-50 cursor-pointer">
+                                  <input 
+                                     type="checkbox" 
+                                     checked={editingSourceAccounts.length === 0}
+                                     onChange={() => setEditingSourceAccounts([])}
+                                     className="accent-amber-500 rounded"
+                                  />
+                                  <span className="text-xs font-medium text-slate-700">همه سرفصل‌ها (اعمال به کل)</span>
+                                </label>
+                                {(cc.available_accounts || []).map((acc: string) => (
+                                  <label key={acc} className="flex items-center gap-2 p-1.5 hover:bg-slate-50 cursor-pointer">
+                                    <input 
+                                       type="checkbox" 
+                                       checked={editingSourceAccounts.includes(acc)}
+                                       onChange={(e) => {
+                                          if(e.target.checked) setEditingSourceAccounts([...editingSourceAccounts, acc]);
+                                          else setEditingSourceAccounts(editingSourceAccounts.filter(a => a !== acc));
+                                       }}
+                                       className="accent-amber-500 rounded"
+                                    />
+                                    <span className="text-xs text-slate-600 truncate">{acc}</span>
+                                  </label>
+                                ))}
+                              </div>
+                              <div className="flex gap-2">
+                                 <button onClick={() => {
+                                    fetch(`/api/cost-centers/${cc.id}`, {
+                                       method: "PUT",
+                                       headers: { "Content-Type": "application/json" },
+                                       body: JSON.stringify({ source_accounts: editingSourceAccounts.join(",") }),
+                                    }).then(() => {
+                                       setEditingChartSourceAccountsId(null);
+                                       fetchCenters();
+                                       fetchReport();
+                                    });
+                                 }} className="flex-1 bg-amber-500 hover:bg-amber-600 text-white text-xs py-1 rounded">تایید</button>
+                                 <button onClick={() => setEditingChartSourceAccountsId(null)} className="flex-1 bg-slate-200 hover:bg-slate-300 text-slate-700 text-xs py-1 rounded">انصراف</button>
+                              </div>
+                           </div>
+                        ) : (
+                           <div 
+                             onClick={() => {
+                                setEditingChartSourceAccountsId(cc.id);
+                                setEditingSourceAccounts(cc.source_accounts ? cc.source_accounts.split(",").filter(Boolean) : []);
+                             }}
+                             className="border border-slate-200 bg-white rounded-lg px-2 py-1 cursor-pointer hover:bg-slate-100 text-xs flex justify-between items-center text-slate-600 min-w-[100px] shadow-sm"
+                           >
+                             <span className="truncate max-w-[80px]">
+                               {cc.source_accounts ? (cc.source_accounts.split(",").length + " سرفصل") : "همه سرفصل‌ها"}
+                             </span>
+                             <ChevronDown size={14} className="text-slate-400 mr-1" />
+                           </div>
+                        )}
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleDeleteCenter(cc.id); }}
+                          className="text-red-400 hover:text-red-600 p-1.5 hover:bg-red-50 rounded transition border border-transparent hover:border-red-100"
+                          title="حذف مرکز فعالیت"
+                        >
+                          <Trash2 size={16} />
+                        </button>
                       </div>
                     </div>
-                    <button
-                      onClick={() => handleDeleteCenter(cc.id)}
-                      className="text-red-400 hover:text-red-600 hover:bg-red-50 p-1.5 rounded transition"
-                    >
-                      <Trash2 size={16} />
-                    </button>
-                  </div>
 
-                  <div className="p-4 flex-1 flex flex-col gap-4">
-                    <div className="mt-2 h-32 flex items-center justify-center pt-4">
-                      {chartData.length > 0 ? (
-                        <div className="w-full flex h-full">
-                          <div className="flex-1 max-w-[120px] flex items-center">
-                            <svg
-                              viewBox="0 0 100 100"
-                              className="w-full h-full transform -rotate-90"
-                            >
-                              {chartData.map(
-                                (d: any, i: number, arr: any[]) => {
-                                  const total = arr.reduce(
-                                    (acc, curr) => acc + curr.value,
-                                    0,
-                                  );
-                                  const prevTotal = arr
-                                    .slice(0, i)
-                                    .reduce((acc, curr) => acc + curr.value, 0);
-                                  if (d.value === total && total > 0) {
-                                    return (
-                                        <circle
-                                            key={d.name}
-                                            cx="50"
-                                            cy="50"
-                                            r="40"
-                                            fill={COLORS[i % COLORS.length]}
-                                        />
-                                    );
+                    <div className="p-4 flex-1 flex flex-col gap-4">
+                      <div className="h-full flex items-center justify-center pt-2">
+                        {chartData.length > 0 ? (
+                          <div className="w-full flex h-full items-center">
+                            <div className="flex-1 max-w-[150px] flex items-center justify-center">
+                              <svg viewBox="0 0 100 100" className="w-full h-full transform -rotate-90">
+                                {chartData.map((d: any, i: number, arr: any[]) => {
+                                  const total = arr.reduce((acc, curr) => acc + curr.value, 0);
+                                  const prevTotal = arr.slice(0, i).reduce((acc, curr) => acc + curr.value, 0);
+                                  if (total === 0 || (d.value === total && total > 0)) {
+                                    return <circle key={d.name} cx="50" cy="50" r="40" fill={COLORS[i % COLORS.length]} />;
                                   }
 
-                                  const startAngle = (prevTotal / total) * 360;
-                                  const endAngle =
-                                    ((prevTotal + d.value) / total) * 360;
+                                  const startAngle = (total > 0 ? (prevTotal / total) : 0) * 360;
+                                  const endAngle = (total > 0 ? ((prevTotal + d.value) / total) : 0) * 360;
 
-                                  // Adjust coordinates so arc works well (to avoid precision issues with perfectly 360)
-                                  const largeArcFlag =
-                                    endAngle - startAngle <= 180 ? 0 : 1;
-                                  const x1 =
-                                    50 +
-                                    40 * Math.cos((Math.PI * startAngle) / 180);
-                                  const y1 =
-                                    50 +
-                                    40 * Math.sin((Math.PI * startAngle) / 180);
-                                  const x2 =
-                                    50 +
-                                    40 * Math.cos((Math.PI * endAngle) / 180);
-                                  const y2 =
-                                    50 +
-                                    40 * Math.sin((Math.PI * endAngle) / 180);
+                                  const largeArcFlag = endAngle - startAngle <= 180 ? 0 : 1;
+                                  const x1 = 50 + 40 * Math.cos((Math.PI * startAngle) / 180);
+                                  const y1 = 50 + 40 * Math.sin((Math.PI * startAngle) / 180);
+                                  const x2 = 50 + 40 * Math.cos((Math.PI * endAngle) / 180);
+                                  const y2 = 50 + 40 * Math.sin((Math.PI * endAngle) / 180);
 
-                                  const pathData = [
-                                    `M 50 50`,
-                                    `L ${x1} ${y1}`,
-                                    `A 40 40 0 ${largeArcFlag} 1 ${x2} ${y2}`,
-                                    `Z`,
-                                  ].join(" ");
-
-
-                                  return (
-                                    <path
-                                      key={d.name}
-                                      d={pathData}
-                                      fill={COLORS[i % COLORS.length]}
-                                    />
-                                  );
-                                },
-                              )}
-                            </svg>
-                          </div>
-                          <div className="flex-1 flex flex-col justify-center overflow-auto px-2 gap-1 custom-scrollbar">
-                            {chartData.map((d: any, i: number) => (
-                              <div
-                                key={d.name}
-                                className="flex items-center justify-between text-xs"
-                              >
-                                <div className="flex items-center gap-1.5 truncate">
-                                  <div
-                                    className="w-2 h-2 rounded-sm shrink-0"
-                                    style={{
-                                      backgroundColor:
-                                        COLORS[i % COLORS.length],
-                                    }}
-                                  ></div>
-                                  <span
-                                    className="truncate text-slate-600"
-                                    title={d.name}
-                                  >
-                                    {d.name}
+                                  const pathData = [`M 50 50`, `L ${x1} ${y1}`, `A 40 40 0 ${largeArcFlag} 1 ${x2} ${y2}`, `Z`].join(" ");
+                                  return <path key={d.name} d={pathData} fill={COLORS[i % COLORS.length]} />;
+                                })}
+                              </svg>
+                            </div>
+                            <div className="flex-1 flex flex-col justify-start overflow-auto px-4 gap-2 custom-scrollbar max-h-full">
+                              {chartData.map((d: any, i: number) => (
+                                <div key={d.name} className="flex items-center justify-between text-sm border-b border-slate-50 pb-1">
+                                  <div className="flex items-center gap-2 truncate">
+                                    <div className="w-3 h-3 rounded-sm shrink-0" style={{ backgroundColor: COLORS[i % COLORS.length] }}></div>
+                                    <span className="truncate text-slate-700" title={d.name}>{d.name}</span>
+                                  </div>
+                                  <span className="font-mono text-slate-500 font-medium shrink-0 pl-2 text-left min-w-[40px]">
+                                    {visualData?.chartTotalCost > 0 ? ((d.value / visualData.chartTotalCost) * 100).toFixed(0) : 0}%
                                   </span>
                                 </div>
-                                <span className="font-mono text-slate-500 shrink-0 pr-2">
-                                  {((d.value / cc.total_cost) * 100).toFixed(0)}
-                                  %
-                                </span>
-                              </div>
-                            ))}
+                              ))}
+                            </div>
                           </div>
-                        </div>
-                      ) : (
-                        <div className="text-slate-400 text-xs text-center">
-                          هیچ جذبی صورت نگرفته است.
-                        </div>
-                      )}
+                        ) : (
+                          <div className="text-slate-400 text-sm text-center">
+                            هیچ جذبی صورت نگرفته است.
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </div>
-                </div>
-              );
-            })}
+                );
+              })}
+            </div>
+            
+            {displayCenters.length > chartsPerPage && (
+               <div className="flex items-center justify-center gap-2 mt-4">
+                  {Array.from({ length: Math.ceil(displayCenters.length / chartsPerPage) }).map((_, i) => (
+                     <button
+                        key={i}
+                        onClick={() => setChartPage(i + 1)}
+                        className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium transition ${chartPage === i + 1 ? 'bg-amber-500 text-white' : 'bg-white border text-slate-600 hover:bg-slate-50'}`}
+                     >
+                        {i + 1}
+                     </button>
+                  ))}
+               </div>
+            )}
           </div>
         )}
 
         {/* Traditional Table View */}
-        {costCenters.length > 0 && (
+        {displayCenters.length > 0 && (
           <div className="mt-8 border rounded-xl overflow-visible print:block text-sm bg-white">
             <h3 className="p-4 bg-slate-50 border-b font-bold text-slate-700">
               جدول لیست مراکز هزینه و تخصیص
@@ -426,6 +561,8 @@ export default function CostAllocationView() {
               <thead className="bg-slate-100 text-slate-700 border-b">
                 <tr>
                   <th className="p-3 font-semibold">تاسیس شده / نام مرکز</th>
+                  <th className="p-3 font-semibold">تسهیم شود؟</th>
+                  <th className="p-3 font-semibold">سرفصل‌های هزینه (سهم‌گیرنده)</th>
                   <th className="p-3 font-semibold">تخصیص یافته (ریال)</th>
                   <th className="p-3 font-semibold">نسبت به کل هزینه</th>
                   <th className="p-3 font-semibold">مبنای تسهیم داینامیک</th>
@@ -434,14 +571,89 @@ export default function CostAllocationView() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {costCenters.map((cc) => {
-                  const sumGlobalCost = costCenters.reduce((acc, curr) => acc + curr.total_cost, 0);
+                {displayCenters.map((cc: any) => {
+                  const sumGlobalCost = displayCenters.reduce((acc: any, curr: any) => acc + curr.total_cost, 0);
                   const shareOfTotal = sumGlobalCost ? ((cc.total_cost / sumGlobalCost) * 100).toFixed(1) : "0.0";
                   
                   return (
                     <tr key={cc.id} className="hover:bg-slate-50">
                       <td className="p-3 font-medium text-slate-800">
                         {cc.name}
+                      </td>
+                      <td className="p-3 text-center">
+                        <input
+                          type="checkbox"
+                          checked={cc.is_active === 1 || cc.is_active === undefined || cc.is_active === true}
+                          onChange={(e) => {
+                            fetch(`/api/cost-centers/${cc.id}`, {
+                                method: 'PUT',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ is_active: e.target.checked ? 1 : 0 })
+                            }).then(() => {
+                                fetchCenters();
+                                fetchReport();
+                            });
+                          }}
+                          className="accent-amber-500 rounded cursor-pointer w-4 h-4"
+                        />
+                      </td>
+                      <td className="p-3 relative">
+                        {editingSourceAccountsId === cc.id ? (
+                           <div className="absolute top-1/2 -translate-y-1/2 left-0 z-20 bg-white border border-slate-300 rounded shadow-lg p-2 min-w-[200px]">
+                              <div className="max-h-40 overflow-auto custom-scrollbar mb-2 border-b pb-2">
+                                <label className="flex items-center gap-2 p-1.5 hover:bg-slate-50 cursor-pointer">
+                                  <input 
+                                     type="checkbox" 
+                                     checked={editingSourceAccounts.length === 0}
+                                     onChange={() => setEditingSourceAccounts([])}
+                                     className="accent-amber-500 rounded"
+                                  />
+                                  <span className="text-xs font-medium text-slate-700">همه سرفصل‌ها (اعمال به کل)</span>
+                                </label>
+                                {(cc.available_accounts || []).map((acc: string) => (
+                                  <label key={acc} className="flex items-center gap-2 p-1.5 hover:bg-slate-50 cursor-pointer">
+                                    <input 
+                                       type="checkbox" 
+                                       checked={editingSourceAccounts.includes(acc)}
+                                       onChange={(e) => {
+                                          if(e.target.checked) setEditingSourceAccounts([...editingSourceAccounts, acc]);
+                                          else setEditingSourceAccounts(editingSourceAccounts.filter(a => a !== acc));
+                                       }}
+                                       className="accent-amber-500 rounded"
+                                    />
+                                    <span className="text-xs text-slate-600 truncate">{acc}</span>
+                                  </label>
+                                ))}
+                              </div>
+                              <div className="flex gap-2">
+                                 <button onClick={() => {
+                                    fetch(`/api/cost-centers/${cc.id}`, {
+                                       method: "PUT",
+                                       headers: { "Content-Type": "application/json" },
+                                       body: JSON.stringify({ source_accounts: editingSourceAccounts.join(",") }),
+                                    }).then(() => {
+                                       setEditingSourceAccountsId(null);
+                                       fetchCenters();
+                                       fetchReport();
+                                    });
+                                 }} className="flex-1 bg-amber-500 hover:bg-amber-600 text-white text-xs py-1 rounded">تایید</button>
+                                 <button onClick={() => setEditingSourceAccountsId(null)} className="flex-1 bg-slate-200 hover:bg-slate-300 text-slate-700 text-xs py-1 rounded">انصراف</button>
+                              </div>
+                           </div>
+                        ) : (
+                           <div 
+                             onClick={() => {
+                                setEditingSourceAccountsId(cc.id);
+                                setEditingSourceAccounts(cc.source_accounts ? cc.source_accounts.split(",").filter(Boolean) : []);
+                             }}
+                             className="border border-slate-200 rounded-full px-3 py-1 cursor-pointer hover:bg-slate-50 text-xs flex justify-between items-center text-slate-600 min-w-[120px]"
+                           >
+                             <span className="truncate max-w-[100px]">
+                               {cc.source_accounts ? (cc.source_accounts.split(",").length + " سرفصل انتخابی") : "همه سرفصل‌ها (خودکار)"}
+                             </span>
+                             <ChevronDown size={14} className="text-slate-400" />
+                           </div>
+                        )}
                       </td>
                       <td className="p-3 font-mono text-slate-600">
                         {Number(cc.total_cost).toLocaleString()}
@@ -507,6 +719,11 @@ export default function CostAllocationView() {
                                   />
                                   <span className="text-xs font-medium text-slate-700">همه رده‌ها (اعمال به کل)</span>
                                 </label>
+                                {availableCategories.length === 0 && (
+                                  <div className="p-2 text-[10px] text-slate-400 text-center">
+                                    ردیف کالایی یافت نشد.
+                                  </div>
+                                )}
                                 {availableCategories.filter(cat => (cc.allocation_level === 'level_2') ? cat.includes(' - ') : !cat.includes(' - ')).map(cat => (
                                   <label key={cat} className="flex items-center gap-2 p-1.5 hover:bg-slate-50 cursor-pointer">
                                     <input 

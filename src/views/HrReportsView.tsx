@@ -38,6 +38,7 @@ export default function HrReportsView() {
   const [activeTab, setActiveTab] = useState("commission");
   const [data, setData] = useState<any>(null);
   const [period, setPeriod] = useState<string>("");
+  const [scanCalcMethod, setScanCalcMethod] = useState<string>("hr");
   const [commissionRate, setCommissionRate] = useState<string>("");
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
@@ -53,11 +54,11 @@ export default function HrReportsView() {
   }, []);
 
   useEffect(() => {
-    fetch(`/api/reports/hr?period=${period}`)
+    fetch(`/api/reports/hr?period=${period}&scanCalcMethod=${scanCalcMethod}`)
       .then((res) => res.json())
       .then(setData)
       .catch(console.error);
-  }, [period]);
+  }, [period, scanCalcMethod]);
 
   const tabs = [
     {
@@ -111,7 +112,7 @@ export default function HrReportsView() {
             availableYears={periods.map((p:any) => p.value.startsWith('Y:') ? p.value.substring(2) : null).filter(Boolean) as string[]}
           />
         </div>
-        <div className="flex flex-col items-center justify-center min-h-[400px] border border-slate-200 rounded-xl bg-white shadow-sm p-10">
+        <div className="flex flex-col items-center justify-center min-h-[450px] border border-slate-200 rounded-xl bg-white shadow-sm p-10">
           <Users size={64} className="text-slate-200 mb-6" />
           <p className="text-lg text-slate-500 font-bold mb-2">داده‌ای یافت نشد.</p>
           <p className="text-slate-400 font-medium">هیچ اطلاعات حضور غیاب یا عملکرد پرسنل تنظیم نشده است.</p>
@@ -131,8 +132,20 @@ export default function HrReportsView() {
             ارزیابی ۳۶۰ درجه عملکرد فروشگاه، شامل گزارشات ورود/خروج، کیفیت فروش و راندمان زمانی
           </p>
         </div>
-        <div className="flex items-center gap-4">
+        <div className="flex flex-wrap items-center gap-4">
           <ExportPrintButtons moduleName="hr" period={period} fileName={`HR_Advanced_Report_${period||"All"}`} />
+          
+          <select 
+            value={scanCalcMethod} 
+            onChange={(e) => setScanCalcMethod(e.target.value)}
+            className="border border-slate-200 rounded-lg p-2 text-sm bg-white shadow-sm"
+          >
+            <option value="hr">مبنای ساعات حضور/غیاب</option>
+            <option value="first_last">مبنای اولین و آخرین اسکن روز</option>
+            <option value="active_hours">مبنای ساعات فعال (ثبت صندوق)</option>
+            <option value="fixed_shift">مبنای شیفت ثابت (۸ ساعت)</option>
+          </select>
+
           <AdvancedPeriodFilter value={period} onChange={setPeriod} availableYears={periods.map((p:any) => p.value.startsWith('Y:') ? p.value.substring(2) : null).filter(Boolean) as string[]} />
         </div>
       </div>
@@ -154,7 +167,7 @@ export default function HrReportsView() {
         ))}
       </div>
 
-      <div className="flex-1 bg-white rounded-xl border border-slate-200 shadow-sm p-6 flex flex-col h-full min-h-[400px]">
+      <div className="flex-1 bg-white rounded-xl border border-slate-200 shadow-sm p-6 flex flex-col h-full min-h-[450px]">
         {/* TAB 1: POROSANT */}
         {activeTab === "commission" && data && (
           <div className="h-full flex flex-col animate-in fade-in zoom-in-95 duration-200">
@@ -270,7 +283,10 @@ export default function HrReportsView() {
                         <div>
                           <div className="flex justify-between items-center mb-1">
                             <span className="text-xs font-semibold text-slate-600">سرعت اسکن آیتم</span>
-                            <span className="font-bold text-blue-600 text-sm">{item.itemsPerMinute} / min</span>
+                            <div className="flex flex-col items-end">
+                                <span className="font-bold text-blue-600 text-sm">{item.itemsPerMinute} / دقیقه</span>
+                                <span className="text-xs text-slate-500">{item.itemsPerHour} / ساعت</span>
+                            </div>
                           </div>
                           <div className="w-full bg-slate-100 rounded-full h-2">
                             <div className="bg-blue-500 h-2 rounded-full" style={{ width: `${Math.min((item.itemsPerMinute/30)*100, 100)}%` }}></div>
@@ -403,7 +419,7 @@ export default function HrReportsView() {
              </div>
              <div className="h-96 w-full mt-4" dir="ltr">
                   <ResponsiveContainer width="100%" height="100%">
-                    <ComposedChart data={data.trendArr} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
+                    <ComposedChart data={data.trendArr} margin={{ top: 20, right: 30, left: 100, bottom: 140 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
                       <XAxis dataKey="date" {...defaultXAxisProps}  />
                       <YAxis yAxisId="left" {...defaultYAxisProps} orientation="left" />
@@ -460,7 +476,7 @@ export default function HrReportsView() {
              <h4 className="font-semibold text-slate-600 text-sm mb-4">نمودار تقاطع حضور پرسنل با بار ترافیک فروش (تشخیص تجمع نیرو)</h4>
              <div className="h-72 w-full" dir="ltr">
                   <ResponsiveContainer width="100%" height="100%">
-                    <ComposedChart data={data.hourlyArr} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
+                    <ComposedChart data={data.hourlyArr} margin={{ top: 20, right: 30, left: 100, bottom: 140 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
                       <XAxis dataKey="hour" {...defaultXAxisProps}  />
                       <YAxis yAxisId="left" {...defaultYAxisProps} orientation="left" />

@@ -82,7 +82,7 @@ export default function SalesReportsView() {
             availableYears={periods.map((p:any) => p.value.startsWith('Y:') ? p.value.substring(2) : null).filter(Boolean) as string[]}
           />
         </div>
-        <div className="flex flex-col items-center justify-center min-h-[400px] border border-slate-200 rounded-xl bg-white shadow-sm p-10">
+        <div className="flex flex-col items-center justify-center min-h-[450px] border border-slate-200 rounded-xl bg-white shadow-sm p-10">
           <ShoppingCart size={64} className="text-slate-200 mb-6" />
           <p className="text-lg text-slate-500 font-bold mb-2">داده‌ای یافت نشد.</p>
           <p className="text-slate-400 font-medium">هیچ فایل فروش یا مرجوعی بارگذاری نشده است.</p>
@@ -132,7 +132,7 @@ export default function SalesReportsView() {
         ))}
       </div>
 
-      <div className="flex-1 bg-white rounded-xl border border-slate-200 shadow-sm p-6 flex flex-col min-h-[400px]">
+      <div className="flex-1 bg-white rounded-xl border border-slate-200 shadow-sm p-6 flex flex-col min-h-[450px]">
         
         {/* === BASKET TAB === */}
         {activeTab === "basket" && data && (
@@ -149,9 +149,9 @@ export default function SalesReportsView() {
                      <h4 className="text-center font-bold text-sm text-slate-600 mb-2">روند ریالی گروه‌ها (Line)</h4>
                      <div dir="ltr" className="w-full h-full flex-1 min-h-0 min-w-0">
 <ResponsiveContainer width="100%" height="100%">
-<LineChart data={data.basketL1} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
+<LineChart data={data.basketL1} margin={{ top: 20, right: 30, left: 100, bottom: 140 }}>
                            <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                           <XAxis dataKey="name" angle={-90} textAnchor="end" height={160} tickFormatter={(v) => v && String(v).length > 25 ? String(v).substring(0, 25) + "..." : v} tick={{fontSize: 12, fontWeight: "bold", dy: 15, dx: -10, fill: "#475569"}} interval={0} axisLine={false} tickLine={false} />
+                           <XAxis dataKey="name" angle={-45} textAnchor="end" height={160} tickFormatter={(v) => v && String(v).length > 25 ? String(v).substring(0, 25) + "..." : v} tick={{fontSize: 12, fontWeight: "bold", dy: 10, dx: -10, fill: "#475569"}} interval={0} axisLine={false} tickLine={false} />
                            <YAxis {...defaultYAxisProps} />
                            <RechartsTooltip formatter={(v:number)=>formatRial(v)}/>
                            <Line type="monotone" dataKey="netAmt" stroke="#3b82f6" strokeWidth={3} dot={{r:4}} />
@@ -218,9 +218,9 @@ export default function SalesReportsView() {
                      <h4 className="text-center font-bold text-sm text-slate-600 mb-2">مقایسه فروش ریالی زیرگروه‌ها (Bar)</h4>
                      <div dir="ltr" className="w-full h-full flex-1 min-h-0 min-w-0">
 <ResponsiveContainer width="100%" height="100%">
-<BarChart data={data.basketL2.slice(0,10)} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
+<BarChart data={data.basketL2.slice(0,10)} margin={{ top: 20, right: 30, left: 100, bottom: 140 }}>
                            <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                           <XAxis dataKey="name" angle={-90} textAnchor="end" height={160} tickFormatter={(v) => v && String(v).length > 25 ? String(v).substring(0, 25) + "..." : v} tick={{fontSize: 12, fontWeight: "bold", dy: 15, dx: -10, fill: "#475569"}} interval={0} axisLine={false} tickLine={false} />
+                           <XAxis dataKey="name" angle={-45} textAnchor="end" height={160} tickFormatter={(v) => v && String(v).length > 25 ? String(v).substring(0, 25) + "..." : v} tick={{fontSize: 12, fontWeight: "bold", dy: 10, dx: -10, fill: "#475569"}} interval={0} axisLine={false} tickLine={false} />
                            <YAxis {...defaultYAxisProps} />
                            <RechartsTooltip formatter={(v:number)=>formatRial(v)}/>
                            <Bar dataKey="netAmt" fill="#10b981" radius={[4,4,0,0]} />
@@ -233,9 +233,9 @@ export default function SalesReportsView() {
                      <h4 className="text-center font-bold text-sm text-slate-600 mb-2">روند تعداد فروش زیرگروه‌ها (Line)</h4>
                      <div dir="ltr" className="w-full h-full flex-1 min-h-0 min-w-0">
 <ResponsiveContainer width="100%" height="100%">
-<LineChart data={data.basketL2.slice(0,10)} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
+<LineChart data={data.basketL2.slice(0,10)} margin={{ top: 20, right: 30, left: 100, bottom: 140 }}>
                            <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                           <XAxis dataKey="name" angle={-90} textAnchor="end" height={160} tickFormatter={(v) => v && String(v).length > 25 ? String(v).substring(0, 25) + "..." : v} tick={{fontSize: 12, fontWeight: "bold", dy: 15, dx: -10, fill: "#475569"}} interval={0} axisLine={false} tickLine={false} />
+                           <XAxis dataKey="name" angle={-45} textAnchor="end" height={160} tickFormatter={(v) => v && String(v).length > 25 ? String(v).substring(0, 25) + "..." : v} tick={{fontSize: 12, fontWeight: "bold", dy: 10, dx: -10, fill: "#475569"}} interval={0} axisLine={false} tickLine={false} />
                            <YAxis {...defaultYAxisProps} />
                            <RechartsTooltip formatter={(v:number)=>formatQty(v)}/>
                            <Line type="monotone" dataKey="netQty" stroke="#f59e0b" strokeWidth={3} dot={{r:4}} />
@@ -283,9 +283,9 @@ export default function SalesReportsView() {
               <h4 className="text-center font-bold text-sm text-slate-600 mb-2">مقایسه فروش و سود ناخالص گروه‌ها</h4>
               <div dir="ltr" className="w-full h-full flex-1 min-h-0 min-w-0">
 <ResponsiveContainer width="100%" height="100%">
-<BarChart data={data.profitL1} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
+<BarChart data={data.profitL1} margin={{ top: 20, right: 30, left: 100, bottom: 140 }}>
                     <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                    <XAxis dataKey="name" angle={-90} textAnchor="end" height={160} tickFormatter={(v) => v && String(v).length > 25 ? String(v).substring(0, 25) + "..." : v} tick={{fontSize: 12, fontWeight: "bold", dy: 15, dx: -10, fill: "#475569"}} interval={0} axisLine={false} tickLine={false} />
+                    <XAxis dataKey="name" angle={-45} textAnchor="end" height={160} tickFormatter={(v) => v && String(v).length > 25 ? String(v).substring(0, 25) + "..." : v} tick={{fontSize: 12, fontWeight: "bold", dy: 10, dx: -10, fill: "#475569"}} interval={0} axisLine={false} tickLine={false} />
                     <YAxis {...defaultYAxisProps} />
                     <RechartsTooltip formatter={(v:number)=>formatRial(v)}/>
                     <Legend />
@@ -337,13 +337,13 @@ export default function SalesReportsView() {
                </h3>
                
                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-                  <div className="h-[400px] border rounded-xl p-4 bg-slate-50 flex flex-col">
+                  <div className="h-[450px] border rounded-xl p-4 bg-slate-50 flex flex-col">
                      <h4 className="text-center font-bold text-sm text-slate-600 mb-2">مبلغ برگشتی گروه اصلی (Bar)</h4>
                      <div dir="ltr" className="w-full h-full flex-1 min-h-0 min-w-0">
 <ResponsiveContainer width="100%" height="100%">
-<BarChart data={data.topReturnedCatL1} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
+<BarChart data={data.topReturnedCatL1} margin={{ top: 20, right: 30, left: 100, bottom: 140 }}>
                            <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                           <XAxis dataKey="name" angle={-90} textAnchor="end" height={160} tickFormatter={(v) => v && String(v).length > 25 ? String(v).substring(0, 25) + "..." : v} tick={{fontSize: 12, fontWeight: "bold", dy: 15, dx: -10, fill: "#475569"}} interval={0} axisLine={false} tickLine={false} />
+                           <XAxis dataKey="name" angle={-45} textAnchor="end" height={160} tickFormatter={(v) => v && String(v).length > 25 ? String(v).substring(0, 25) + "..." : v} tick={{fontSize: 12, fontWeight: "bold", dy: 10, dx: -10, fill: "#475569"}} interval={0} axisLine={false} tickLine={false} />
                            <YAxis {...defaultYAxisProps} />
                            <RechartsTooltip formatter={(v:number)=>formatRial(v)}/>
                            <Bar dataKey="returnAmt" name="مبلغ برگشتی" fill="#ef4444" radius={[4,4,0,0]} />
@@ -351,11 +351,11 @@ export default function SalesReportsView() {
 </ResponsiveContainer>
 </div>
                   </div>
-                  <div className="h-[400px] border rounded-xl p-4 bg-slate-50 flex flex-col">
+                  <div className="h-[450px] border rounded-xl p-4 bg-slate-50 flex flex-col">
                      <h4 className="text-center font-bold text-sm text-slate-600 mb-2">مبلغ برگشتی زیرگروه (Bar)</h4>
                      <div dir="ltr" className="w-full h-full flex-1 min-h-0 min-w-0">
 <ResponsiveContainer width="100%" height="100%">
-<BarChart data={data.topReturnedCatL2} layout="vertical" margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
+<BarChart data={data.topReturnedCatL2} layout="vertical" margin={{ top: 20, right: 30, left: 100, bottom: 140 }}>
                            <CartesianGrid strokeDasharray="3 3" horizontal={false} />
                            <XAxis {...hideAxisProps} />
                            <YAxis dataKey="name" {...verticalYAxisProps} />
@@ -412,7 +412,7 @@ export default function SalesReportsView() {
 <ResponsiveContainer width="100%" height="100%">
 <BarChart
                     data={data.trafficArr}
-                    margin={{ top: 20, right: 30, left: 20, bottom: 20 }}
+                    margin={{ top: 20, right: 30, left: 100, bottom: 140 }}
                   >
                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
                     <XAxis dataKey="hour" {...defaultXAxisProps}  />
@@ -436,7 +436,7 @@ export default function SalesReportsView() {
         )}
 
         {!data && (
-          <div className="w-full h-full flex flex-col items-center justify-center text-slate-400 text-center flex-1 min-h-[300px]">
+          <div className="w-full h-full flex flex-col items-center justify-center text-slate-400 text-center flex-1 min-h-[450px]">
             <ShoppingCart size={48} className="mb-4 text-slate-300 animate-pulse" />
             <p>در حال پردازش و استخراج گزارشات پیشرفته...</p>
           </div>

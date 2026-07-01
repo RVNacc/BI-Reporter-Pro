@@ -11,6 +11,7 @@ export function WeeklyReportsView() {
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<any>(null);
   const [period, setPeriod] = useState("");
+  const [netMode, setNetMode] = useState(true);
   const [periods, setPeriods] = useState<any[]>([]);
   const [mode, setMode] = useState<"amt" | "qty">("amt"); // ریالی یا تعدادی
   const [search, setSearch] = useState("");
@@ -39,7 +40,7 @@ export function WeeklyReportsView() {
     if (period || period === "") {
        fetchData();
     }
-  }, [period]);
+  }, [period, netMode]);
 
   const handleExportCSV = () => {
      if (!data || !data.rows || !data.weeks) return;
@@ -119,7 +120,7 @@ export function WeeklyReportsView() {
              <h4 className="text-center font-bold text-sm text-slate-600 mb-2 shrink-0">روند کل {mode === 'amt' ? 'ریالی' : 'تعدادی'} (لاین)</h4>
              <div dir="ltr" className="w-full h-full flex-1 min-h-0 min-w-0">
                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={chartData} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
+                    <LineChart data={chartData} margin={{ top: 20, right: 30, left: 100, bottom: 140 }}>
                         <CartesianGrid strokeDasharray="3 3" vertical={false} />
                         <XAxis dataKey="weekName" {...defaultXAxisProps}  />
                         <YAxis {...defaultYAxisProps} />
@@ -133,7 +134,7 @@ export function WeeklyReportsView() {
              <h4 className="text-center font-bold text-sm text-slate-600 mb-2 shrink-0">مجموع {mode === 'amt' ? 'ریالی' : 'تعدادی'} کل (ستون)</h4>
              <div dir="ltr" className="w-full h-full flex-1 min-h-0 min-w-0">
                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={chartData} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
+                    <BarChart data={chartData} margin={{ top: 20, right: 30, left: 100, bottom: 140 }}>
                         <CartesianGrid strokeDasharray="3 3" vertical={false} />
                         <XAxis dataKey="weekName" {...defaultXAxisProps}  />
                         <YAxis {...defaultYAxisProps} />
@@ -226,7 +227,7 @@ export function WeeklyReportsView() {
                  بیشترین رشد نسبی (هفته {data.weeks[data.weeks.length-1]} به {data.weeks[data.weeks.length-2]})
                  <span className="text-xs font-normal text-slate-500">{(mode === 'amt' ? "ریالی" : "تعدادی")}</span>
               </h3>
-              <div className="overflow-y-auto max-h-[300px]">
+              <div className="overflow-y-auto max-h-[450px]">
                  <ul className="space-y-2">
                     {data.movers[mode === 'amt' ? 'topGrowersAmt' : 'topGrowersQty'].slice(0,10).map((m: any, i: number) => (
                         <li key={i} className="flex justify-between items-center text-sm p-2 hover:bg-slate-50 rounded">
@@ -244,7 +245,7 @@ export function WeeklyReportsView() {
                  بیشترین افت نسبی (هفته {data.weeks[data.weeks.length-1]} به {data.weeks[data.weeks.length-2]})
                  <span className="text-xs font-normal text-slate-500">{(mode === 'amt' ? "ریالی" : "تعدادی")}</span>
               </h3>
-              <div className="overflow-y-auto max-h-[300px]">
+              <div className="overflow-y-auto max-h-[450px]">
                  <ul className="space-y-2">
                     {data.movers[mode === 'amt' ? 'topDeclinersAmt' : 'topDeclinersQty'].slice(0,10).map((m: any, i: number) => (
                         <li key={i} className="flex justify-between items-center text-sm p-2 hover:bg-slate-50 rounded border-r-2 border-r-rose-400">

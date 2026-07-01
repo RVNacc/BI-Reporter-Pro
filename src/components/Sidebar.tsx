@@ -7,6 +7,7 @@ import {
   Users,
   Calculator,
   BarChart3,
+  Activity,
   X
 } from "lucide-react";
 
@@ -23,6 +24,8 @@ export default function Sidebar({ currentView, setCurrentView, closeSidebar }: S
     { id: "sales", label: "فروش و صندوق‌", icon: <TrendingUp size={20} /> },
     { id: "inventory", label: "انبار و تامین‌کنندگان", icon: <PackageSearch size={20} /> },
     { id: "finance", label: "مالی و خزانه‌داری", icon: <BadgeDollarSign size={20} /> },
+    { id: "cost-control", label: "کنترل و تحلیل هزینه‌ها", icon: <Activity size={20} /> },
+    { id: "budget", label: "بودجه و انحرافات", icon: <Calculator size={20} /> },
     { id: "abc", label: "بهابای تمام شده (ABC)", icon: <Calculator size={20} /> },
     { id: "pareto", label: "گزارشات پارتو", icon: <BarChart3 size={20} /> },
     { id: "weekly", label: "روند فروش هفتگی", icon: <TrendingUp size={20} /> },

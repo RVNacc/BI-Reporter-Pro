@@ -160,7 +160,7 @@ export default function DashboardView() {
             <ResponsiveContainer width="100%" height="100%">
               <LineChart
                 data={data.salesTrend}
-                margin={{ top: 20, right: 30, left: 20, bottom: 20 }}
+                margin={{ top: 20, right: 30, left: 100, bottom: 140 }}
               >
                 <CartesianGrid
                   strokeDasharray="3 3"
@@ -169,7 +169,7 @@ export default function DashboardView() {
                 />
                 <XAxis
                   dataKey="name"
-                  angle={-90} textAnchor="end" height={160} tickFormatter={(v) => v && String(v).length > 25 ? String(v).substring(0, 25) + "..." : v} tick={{fontSize: 12, fontWeight: "bold", dy: 15, dx: -10, fill: "#475569"}} interval={0}
+                  angle={-45} textAnchor="end" height={160} tickFormatter={(v) => v && String(v).length > 25 ? String(v).substring(0, 25) + "..." : v} tick={{fontSize: 12, fontWeight: "bold", dy: 10, dx: -10, fill: "#475569"}} interval={0}
                   axisLine={false}
                   tickLine={false}
                 />
@@ -211,7 +211,7 @@ export default function DashboardView() {
               <BarChart
                 data={data.paretoData}
                 layout="vertical"
-                margin={{ top: 20, right: 30, left: 20, bottom: 20 }}
+                margin={{ top: 20, right: 30, left: 100, bottom: 140 }}
               >
                 <CartesianGrid
                   strokeDasharray="3 3"

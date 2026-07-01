@@ -7,6 +7,10 @@ import {
 import { BadgeDollarSign, Filter, Search } from "lucide-react";
 import ExportPrintButtons from "../components/ExportPrintButtons";
 import { defaultXAxisProps, defaultYAxisProps, verticalYAxisProps, hideAxisProps } from "../components/charts/ChartConfig";
+import DatePicker from "react-multi-date-picker";
+import persian from "react-date-object/calendars/persian";
+import persian_fa from "react-date-object/locales/persian_fa";
+
 
 export default function ProfitLossReportsView() {
   
@@ -121,6 +125,18 @@ export default function ProfitLossReportsView() {
      return applySortAndFilter(rows, r => r.totalProfitLoss > 0, r => r.totalProfitLoss < 0);
   }, [dayRowsRaw, statusFilter, sortConfig]);
 
+  const [page, setPage] = useState(1);
+  useEffect(() => {
+      setPage(1);
+  }, [dayRows]);
+
+  const itemsPerPage = 50;
+  const paginatedDayRows = useMemo(() => {
+     const start = (page - 1) * itemsPerPage;
+     return dayRows.slice(start, start + itemsPerPage);
+  }, [dayRows, page]);
+  const totalPages = Math.ceil(dayRows.length / itemsPerPage);
+
   const rangeAggregated = useMemo(() => {
      let arr = [...rangeAggRaw];
      if (!sortConfig) {
@@ -234,7 +250,16 @@ export default function ProfitLossReportsView() {
       {tab === 'day' && (
          <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
             <div className="p-4 border-b border-slate-200 bg-slate-50 flex items-center gap-4">
-                <input type="text" placeholder="1402/05/12" dir="ltr" value={exactDate} onChange={e => setExactDate(e.target.value)} className="border border-slate-300 rounded-lg px-3 py-1.5 text-sm" />
+                <DatePicker
+                    calendar={persian}
+                    locale={persian_fa}
+                    calendarPosition="bottom-right"
+                    value={exactDate}
+                    onChange={(dateObj: any) => setExactDate(dateObj ? dateObj.format("YYYY/MM/DD") : "")}
+                    format="YYYY/MM/DD"
+                    placeholder="انتخاب تاریخ..."
+                    inputClass="border border-slate-300 rounded-lg px-3 py-1.5 text-sm w-[120px] text-center font-mono"
+                />
                 <span className="text-slate-500 text-sm">فیلتر تاریخ مشخص برای مشاهده کالاهایی که با زیان فروخته شده‌اند</span>
             </div>
             <div className="overflow-x-auto max-h-[600px] custom-scrollbar">
@@ -255,7 +280,7 @@ export default function ProfitLossReportsView() {
                        </tr>
                    </thead>
                    <tbody className="divide-y divide-slate-100">
-                       {dayRows.map((r, i) => (
+                       {paginatedDayRows.map((r, i) => (
                            <tr key={i} className="hover:bg-slate-50">
                                <td className="px-4 py-2 text-slate-500" dir="ltr">{r.date}</td>
                                <td className="px-4 py-2 font-mono text-xs">{r.code}</td>
@@ -270,12 +295,40 @@ export default function ProfitLossReportsView() {
                                <td className={`px-4 py-2 font-medium ${r.totalProfitLoss > 0 ? "text-emerald-600" : (r.totalProfitLoss < 0 ? "text-rose-600" : "text-slate-500")}`} dir="ltr">{formatRial(r.totalProfitLoss)}</td>
                            </tr>
                        ))}
-                       {dayRows.length === 0 && (
+                       {paginatedDayRows.length === 0 && (
                            <tr><td colSpan={11} className="py-8 text-center text-slate-500">داده‌ای متناسب با فیلتر یافت نشد</td></tr>
                        )}
                    </tbody>
                </table>
             </div>
+            
+            {/* Pagination Controls */}
+            {totalPages > 1 && (
+                <div className="flex items-center justify-between px-4 py-3 bg-slate-50 border-t border-slate-200">
+                    <span className="text-sm text-slate-500">
+                        نمایش {(page - 1) * itemsPerPage + 1} تا {Math.min(page * itemsPerPage, dayRows.length)} از {dayRows.length} ردیف
+                    </span>
+                    <div className="flex items-center gap-2">
+                        <button 
+                            onClick={() => setPage(p => Math.max(1, p - 1))} 
+                            disabled={page === 1}
+                            className="px-3 py-1 bg-white border border-slate-200 rounded text-sm disabled:opacity-50 hover:bg-slate-100"
+                        >
+                            قبلی
+                        </button>
+                        <span className="text-sm text-slate-600 font-medium px-2">
+                            صفحه {page} از {totalPages}
+                        </span>
+                        <button 
+                            onClick={() => setPage(p => Math.min(totalPages, p + 1))} 
+                            disabled={page === totalPages}
+                            className="px-3 py-1 bg-white border border-slate-200 rounded text-sm disabled:opacity-50 hover:bg-slate-100"
+                        >
+                            بعدی
+                        </button>
+                    </div>
+                </div>
+            )}
          </div>
       )}
 
@@ -284,11 +337,29 @@ export default function ProfitLossReportsView() {
             <div className="p-4 border-b border-slate-200 bg-slate-50 flex items-center gap-4 flex-wrap">
                 <div className="flex items-center gap-2">
                     <span className="text-sm text-slate-600">از تایخ:</span>
-                    <input type="text" placeholder="1402/05/12" dir="ltr" value={startDate} onChange={e => setStartDate(e.target.value)} className="border border-slate-300 rounded-lg px-3 py-1.5 text-sm" />
+                    <DatePicker
+                        calendar={persian}
+                        locale={persian_fa}
+                        calendarPosition="bottom-right"
+                        value={startDate}
+                        onChange={(dateObj: any) => setStartDate(dateObj ? dateObj.format("YYYY/MM/DD") : "")}
+                        format="YYYY/MM/DD"
+                        placeholder="انتخاب تاریخ..."
+                        inputClass="border border-slate-300 rounded-lg px-3 py-1.5 text-sm w-[120px] text-center font-mono"
+                    />
                 </div>
                 <div className="flex items-center gap-2">
                     <span className="text-sm text-slate-600">تا تاریخ:</span>
-                    <input type="text" placeholder="1402/05/12" dir="ltr" value={endDate} onChange={e => setEndDate(e.target.value)} className="border border-slate-300 rounded-lg px-3 py-1.5 text-sm" />
+                    <DatePicker
+                        calendar={persian}
+                        locale={persian_fa}
+                        calendarPosition="bottom-right"
+                        value={endDate}
+                        onChange={(dateObj: any) => setEndDate(dateObj ? dateObj.format("YYYY/MM/DD") : "")}
+                        format="YYYY/MM/DD"
+                        placeholder="انتخاب تاریخ..."
+                        inputClass="border border-slate-300 rounded-lg px-3 py-1.5 text-sm w-[120px] text-center font-mono"
+                    />
                 </div>
                 <button onClick={fetchData} className="px-4 py-1.5 hover:bg-slate-200 rounded-lg text-sm bg-white border shadow-sm">به روزرسانی</button>
             </div>
@@ -407,7 +478,7 @@ export default function ProfitLossReportsView() {
                    <h3 className="text-sm font-bold text-slate-700 mb-4 text-center">پر سودترین کالاها (Top 10)</h3>
                    <div dir="ltr" className="w-full h-full flex-1 min-h-0 min-w-0">
 <ResponsiveContainer width="100%" height="85%">
-<BarChart data={chartData.topProfits} layout="vertical" margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
+<BarChart data={chartData.topProfits} layout="vertical" margin={{ top: 20, right: 30, left: 100, bottom: 140 }}>
                          <CartesianGrid strokeDasharray="3 3" horizontal={false} opacity={0.5} />
                          <XAxis {...hideAxisProps} />
                          <YAxis dataKey="name" {...verticalYAxisProps} />
@@ -423,7 +494,7 @@ export default function ProfitLossReportsView() {
                    <h3 className="text-sm font-bold text-slate-700 mb-4 text-center">پر زیان‌ترین کالاها (Top 10)</h3>
                    <div dir="ltr" className="w-full h-full flex-1 min-h-0 min-w-0">
 <ResponsiveContainer width="100%" height="85%">
-<BarChart data={chartData.topLosses} layout="vertical" margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
+<BarChart data={chartData.topLosses} layout="vertical" margin={{ top: 20, right: 30, left: 100, bottom: 140 }}>
                          <CartesianGrid strokeDasharray="3 3" horizontal={false} opacity={0.5} />
                          <XAxis {...hideAxisProps} />
                          <YAxis dataKey="name" {...verticalYAxisProps} />
@@ -439,7 +510,7 @@ export default function ProfitLossReportsView() {
                    <h3 className="text-sm font-bold text-slate-700 mb-4 text-center">مقایسه سود و زیان گروه‌های اصلی کالا</h3>
                    <div dir="ltr" className="w-full h-full flex-1 min-h-0 min-w-0">
 <ResponsiveContainer width="100%" height="85%">
-<ComposedChart data={hierarchyAggregated.l1} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
+<ComposedChart data={hierarchyAggregated.l1} margin={{ top: 20, right: 30, left: 100, bottom: 140 }}>
                           <CartesianGrid strokeDasharray="3 3" vertical={false} opacity={0.4} />
                           <XAxis dataKey="name" {...defaultXAxisProps}  />
                           <YAxis {...defaultYAxisProps} orientation="left" />
@@ -454,7 +525,7 @@ export default function ProfitLossReportsView() {
                 </div>
 
                 {/* Status Pie */}
-                <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 h-[400px]">
+                <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 h-[450px]">
                    <h3 className="text-sm font-bold text-slate-700 mb-4 text-center">سهم رکوردهای فروش (تعدادی)</h3>
                    <div dir="ltr" className="w-full h-full flex-1 min-h-0 min-w-0">
 <ResponsiveContainer width="100%" height="85%">

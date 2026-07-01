@@ -12,10 +12,12 @@ import InventoryReportsView from './views/InventoryReportsView';
 import FinanceReportsView from './views/FinanceReportsView';
 import HrReportsView from './views/HrReportsView';
 import CostAllocationView from './views/CostAllocationView';
+import CostControlAnalysisView from './views/CostControlAnalysisView';
 import ParetoReportsView from './views/ParetoReportsView';
 import { WeeklyReportsView } from './views/WeeklyReportsView';
 import ProfitLossReportsView from './views/ProfitLossReportsView';
 import AdvancedManagementView from './views/AdvancedManagementView';
+import BudgetManagementView from './views/BudgetManagementView';
 import { Menu } from 'lucide-react';
 
 export default function App() {
@@ -34,10 +36,14 @@ export default function App() {
         return <InventoryReportsView />;
       case 'finance':
         return <FinanceReportsView />;
+      case 'cost-control':
+        return <CostControlAnalysisView />;
       case 'hr':
         return <HrReportsView />;
       case 'abc':
         return <CostAllocationView />;
+      case 'budget':
+        return <BudgetManagementView />;
       case 'pareto':
         return <ParetoReportsView />;
       case 'weekly':

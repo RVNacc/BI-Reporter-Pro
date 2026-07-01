@@ -10,7 +10,10 @@ import {
   Tooltip as RechartsTooltip,
   Legend,
   BarChart,
-  Cell
+  Cell,
+  LineChart,
+  AreaChart,
+  Area
 } from "recharts";
 import {
   Filter,
@@ -23,16 +26,25 @@ import {
   AlertTriangle,
   CheckCircle2,
   Search,
-  Bookmark
+  Bookmark,
+  Target,
+  BrainCircuit,
+  LineChart as LineChartIcon
 } from "lucide-react";
 import AdvancedPeriodFilter from "../components/AdvancedPeriodFilter";
 import ExportPrintButtons from "../components/ExportPrintButtons";
 import { defaultXAxisProps, defaultYAxisProps, verticalYAxisProps, hideAxisProps } from "../components/charts/ChartConfig";
 
 export default function AdvancedManagementView() {
+  const [activeTab, setActiveTab] = useState("bi");
   const [period, setPeriod] = useState<string>("");
   const [availablePeriods, setAvailablePeriods] = useState<any[]>([]);
+  
   const [data, setData] = useState<any>(null);
+  const [forecastData, setForecastData] = useState<any>(null);
+  const [breakevenData, setBreakevenData] = useState<any>(null);
+  const [costTrendData, setCostTrendData] = useState<any>(null);
+  
   const [loading, setLoading] = useState(true);
   
   // Search and filters for stock reconciliation table
@@ -46,22 +58,24 @@ export default function AdvancedManagementView() {
       .catch(console.error);
   }, []);
 
-  const fetchData = () => {
+  const fetchData = async () => {
     setLoading(true);
-    fetch(`/api/reports/advanced-bi?period=${period}`)
-      .then((res) => {
-        if (!res.ok) throw new Error("API response error");
-        return res.json();
-      })
-      .then((resData) => {
-        setData(resData || {});
-        setLoading(false);
-      })
-      .catch((err) => {
-        console.error("Error fetching advanced bi report:", err);
-        setData({});
-        setLoading(false);
-      });
+    try {
+        const [biRes, forecastRes, breakevenRes, costRes] = await Promise.all([
+            fetch(`/api/reports/advanced-bi?period=${period}`),
+            fetch(`/api/reports/forecast?period=${period}`),
+            fetch(`/api/reports/breakeven?period=${period}`),
+            fetch(`/api/reports/cost-trends?period=${period}`)
+        ]);
+
+        if (biRes.ok) setData(await biRes.json());
+        if (forecastRes.ok) setForecastData(await forecastRes.json());
+        if (breakevenRes.ok) setBreakevenData(await breakevenRes.json());
+        if (costRes.ok) setCostTrendData(await costRes.json());
+    } catch (err) {
+        console.error("Error fetching advanced reports:", err);
+    }
+    setLoading(false);
   };
 
   useEffect(() => {
@@ -70,7 +84,7 @@ export default function AdvancedManagementView() {
 
   if (loading || !data) {
     return (
-      <div id="loading-spinner" className="flex flex-col items-center justify-center min-h-[400px]">
+      <div id="loading-spinner" className="flex flex-col items-center justify-center min-h-[450px]">
         <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
         <p className="mt-4 text-slate-500 font-medium">در حال پردازش آمار و الگوهای پیشرفته...</p>
       </div>
@@ -108,10 +122,6 @@ export default function AdvancedManagementView() {
   const discrepancyCount = (data.reconciliationList || [])
     .filter((item: any) => item.expectedQty < 0).length;
 
-  const handlePrint = () => {
-    window.print();
-  };
-
   const handleExportCSV = () => {
     // Basic CSV download helper
     const headers = "کد کالا,نام کالا,گروه اصلی,موجودی اول دوره,خرید خالص,فروش خالص,موجودی پایان دوره تخمینی,وضعیت تطبیق\n";
@@ -141,7 +151,7 @@ export default function AdvancedManagementView() {
             availableYears={availablePeriods.map((p:any) => p.value.startsWith('Y:') ? p.value.substring(2) : null).filter(Boolean) as string[]}
           />
         </div>
-        <div className="flex flex-col items-center justify-center min-h-[400px] border border-slate-200 rounded-xl bg-white shadow-sm p-10">
+        <div className="flex flex-col items-center justify-center min-h-[450px] border border-slate-200 rounded-xl bg-white shadow-sm p-10">
           <AlertTriangle size={64} className="text-slate-200 mb-6" />
           <p className="text-lg text-slate-500 font-bold mb-2">داده‌ای یافت نشد.</p>
           <p className="text-slate-400 font-medium">هیچ اطلاعات عملیاتی یا تراکنشی برای تولید گزارشات هوش تجاری در این فیلتر یا برنامه وجود ندارد. لطفاً ابتدا اسناد مورد نیاز را آپلود کنید.</p>
@@ -157,10 +167,10 @@ export default function AdvancedManagementView() {
         <div>
           <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
             <span className="w-2.5 h-6 bg-blue-600 rounded-full inline-block"></span>
-            داشبورد هوش تجاری و گزارش‌های تخصصی مدیریت (BI)
+            هوش تجاری و گزارش‌های پیشرفته (BI)
           </h2>
           <p className="text-sm text-slate-500 mt-1">
-            تحلیل الگوهای رفتاری صندوق، توزیع ترافیک، بهینه‌سازی ارزیابی تامین‌کنندگان و مغایرت‌گیری انبار بر اساس اسناد بارگذاری‌شده
+            تحلیل الگوهای رفتاری صندوق، مغایرت‌گیری انبار، پیش‌بینی هوشمند و نقطه‌سربه‌سر
           </p>
         </div>
 
@@ -170,14 +180,44 @@ export default function AdvancedManagementView() {
       </div>
 
       {/* Period Selector Panel */}
-      <div id="filter-wrapper" className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+      <div id="filter-wrapper" className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col gap-4">
         <AdvancedPeriodFilter
           value={period}
           onChange={setPeriod}
           availableYears={availablePeriods.map((p:any) => p.value.startsWith('Y:') ? p.value.substring(2) : null).filter(Boolean) as string[]}
         />
+        
+        {/* Navigation Tabs */}
+        <div className="flex gap-2 border-b border-slate-200 overflow-x-auto pt-2">
+          <button 
+             onClick={() => setActiveTab('bi')} 
+             className={`px-4 py-3 text-sm font-medium whitespace-nowrap border-b-2 flex items-center gap-2 ${activeTab === 'bi' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-800'}`}
+          >
+             <BarChart3 size={18} /> داشبورد BI و انبار
+          </button>
+          <button 
+             onClick={() => setActiveTab('forecast')} 
+             className={`px-4 py-3 text-sm font-medium whitespace-nowrap border-b-2 flex items-center gap-2 ${activeTab === 'forecast' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-slate-500 hover:text-slate-800'}`}
+          >
+             <BrainCircuit size={18} /> پیش‌بینی و هشدار هوشمند
+          </button>
+          <button 
+             onClick={() => setActiveTab('breakeven')} 
+             className={`px-4 py-3 text-sm font-medium whitespace-nowrap border-b-2 flex items-center gap-2 ${activeTab === 'breakeven' ? 'border-rose-600 text-rose-600' : 'border-transparent text-slate-500 hover:text-slate-800'}`}
+          >
+             <Target size={18} /> تحلیل نقطه سر‌به‌سر
+          </button>
+          <button 
+             onClick={() => setActiveTab('costtrends')} 
+             className={`px-4 py-3 text-sm font-medium whitespace-nowrap border-b-2 flex items-center gap-2 ${activeTab === 'costtrends' ? 'border-emerald-600 text-emerald-600' : 'border-transparent text-slate-500 hover:text-slate-800'}`}
+          >
+             <LineChartIcon size={18} /> روند تغییرات بهای تمام شده
+          </button>
+        </div>
       </div>
 
+      {activeTab === 'bi' && (
+      <>
       {/* KPI Cards Bento Box */}
       <div id="kpi-grid" className="grid grid-cols-1 md:grid-cols-4 gap-4">
         {/* Suppliers Count */}
@@ -240,7 +280,7 @@ export default function AdvancedManagementView() {
           </h3>
           <div className="h-96 w-full" dir="ltr">
             <ResponsiveContainer width="100%" height="100%">
-              <ComposedChart data={data.weekdayArr} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
+              <ComposedChart data={data.weekdayArr} margin={{ top: 20, right: 30, left: 100, bottom: 140 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
                 <XAxis dataKey="name" {...defaultXAxisProps}  />
                 <YAxis yAxisId="left" {...defaultYAxisProps} orientation="left"/>
@@ -267,7 +307,7 @@ export default function AdvancedManagementView() {
           </h3>
           <div className="h-96 w-full" dir="ltr">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={data.supplierArr?.slice(0, 10)} margin={{ top: 20, right: 30, left: 20, bottom: 20 }}>
+              <BarChart data={data.supplierArr?.slice(0, 10)} margin={{ top: 20, right: 30, left: 100, bottom: 140 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
                 <XAxis dataKey="name" {...defaultXAxisProps}  />
                 <YAxis yAxisId="left" {...defaultYAxisProps} orientation="left"/>
@@ -427,6 +467,131 @@ export default function AdvancedManagementView() {
           </table>
         </div>
       </div>
+      </>
+      )}
+
+      {/* FORECAST TAB */}
+      {activeTab === 'forecast' && forecastData && (
+        <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
+          <h3 className="font-semibold text-slate-700 mb-6 flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-indigo-500"></span>
+            پیش‌بینی هوشمند فروش (Smart Forecasting)
+          </h3>
+          <p className="text-sm text-slate-500 mb-6">
+             مدل‌سازی روند آتی فروش بر اساس میانگین متحرک روزهای گذشته و تشخیص الگوهای رشد.
+          </p>
+          <div className="h-96 w-full" dir="ltr">
+            <ResponsiveContainer width="100%" height="100%">
+              <ComposedChart margin={{ top: 20, right: 30, left: 100, bottom: 140 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                <XAxis dataKey="date" allowDuplicatedCategory={false} {...defaultXAxisProps} />
+                <YAxis {...defaultYAxisProps} />
+                <RechartsTooltip formatter={(val: number) => val.toLocaleString() + " ریال"} />
+                <Legend />
+                <Bar data={forecastData.trendData} dataKey="actual" name="فروش واقعی" fill="#94a3b8" barSize={30} radius={[4, 4, 0, 0]} />
+                <Line data={forecastData.trendData} type="monotone" dataKey="forecast" name="مدل برازش شده (تطبیق)" stroke="#6366f1" strokeWidth={3} dot={false} />
+                <Line data={forecastData.futureForecast} type="monotone" dataKey="projectedSales" name="پیش‌بینی روزهای آتی" stroke="#8b5cf6" strokeWidth={3} strokeDasharray="5 5" />
+              </ComposedChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      )}
+
+      {/* BREAKEVEN TAB */}
+      {activeTab === 'breakeven' && breakevenData && (
+        <div className="space-y-6">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+             <div className="bg-gradient-to-br from-white to-rose-50/20 p-5 rounded-xl border border-slate-200 shadow-sm flex items-center gap-4">
+                <div className="w-12 h-12 bg-rose-100 text-rose-600 rounded-lg flex items-center justify-center">
+                  <Target size={24} />
+                </div>
+                <div>
+                  <span className="text-xs text-slate-500 block">هزینه‌های ثابت (عملیاتی)</span>
+                  <span className="text-xl font-bold text-slate-800 block mt-0.5">{Number(breakevenData.fixedCosts.toFixed(0)).toLocaleString()} ریال</span>
+                </div>
+              </div>
+              <div className="bg-gradient-to-br from-white to-blue-50/20 p-5 rounded-xl border border-slate-200 shadow-sm flex items-center gap-4">
+                <div className="w-12 h-12 bg-blue-100 text-blue-600 rounded-lg flex items-center justify-center">
+                  <TrendingUp size={24} />
+                </div>
+                <div>
+                  <span className="text-xs text-slate-500 block">ضریب حاشیه فروش (CM Ratio)</span>
+                  <span className="text-xl font-bold text-slate-800 block mt-0.5">{(breakevenData.cmRatio * 100).toFixed(1)}%</span>
+                </div>
+              </div>
+              <div className="bg-gradient-to-br from-white to-emerald-50/20 p-5 rounded-xl border border-slate-200 shadow-sm flex items-center gap-4">
+                <div className="w-12 h-12 bg-emerald-100 text-emerald-600 rounded-lg flex items-center justify-center">
+                  <CheckCircle2 size={24} />
+                </div>
+                <div>
+                  <span className="text-xs text-slate-500 block">نقطه سر‌به‌سر (فروش معادل)</span>
+                  <span className="text-xl font-bold text-slate-800 block mt-0.5">{Number(breakevenData.breakevenPoint.toFixed(0)).toLocaleString()} ریال</span>
+                </div>
+              </div>
+          </div>
+
+          <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
+            <h3 className="font-semibold text-slate-700 mb-6 flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-rose-500"></span>
+              نمودار تحلیل نقطه سر‌به‌سر (Breakeven Analysis)
+            </h3>
+            <p className="text-sm text-slate-500 mb-6">
+               محل تقاطع خطوط فروش و مجموع هزینه‌ها، نشان‌دهنده میزان فروشی است که در آن سود عملیاتی صفر خواهد بود.
+            </p>
+            <div className="h-[450px] w-full" dir="ltr">
+              <ResponsiveContainer width="100%" height="100%">
+                <ComposedChart data={breakevenData.chartData} margin={{ top: 20, right: 30, left: 100, bottom: 140 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                  <XAxis dataKey="salesVolume" {...defaultXAxisProps} tickFormatter={(v) => (v/1000000).toFixed(0) + 'm'} />
+                  <YAxis {...defaultYAxisProps} tickFormatter={(v) => (v/1000000).toFixed(0) + 'm'} />
+                  <RechartsTooltip formatter={(val: number) => val.toLocaleString() + " ریال"} labelFormatter={(l: number) => "حجم فروش فرضی: " + l.toLocaleString()} />
+                  <Legend />
+                  <Line type="monotone" dataKey="fixedCost" name="هزینه ثابت" stroke="#ef4444" strokeWidth={2} dot={false} strokeDasharray="5 5" />
+                  <Line type="monotone" dataKey="totalCost" name="مجموع هزینه‌ها (ثابت+متغیر)" stroke="#f59e0b" strokeWidth={3} dot={false} />
+                  <Area type="monotone" dataKey="revenue" name="درآمد فروش" fill="#10b981" fillOpacity={0.1} stroke="#10b981" strokeWidth={3} />
+                </ComposedChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* COST TRENDS TAB */}
+      {activeTab === 'costtrends' && costTrendData && (
+        <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
+          <h3 className="font-semibold text-slate-700 mb-6 flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+            روند تغییرات بهای تمام شده (نرخ خرید) ۵ کالای پر تکرار
+          </h3>
+          <p className="text-sm text-slate-500 mb-6">
+             نمایش تغییرات تورمی یا کاهش نرخ خرید در طول زمان برای اقلام پرتراکنش انبار.
+          </p>
+          <div className="h-[500px] w-full" dir="ltr">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart margin={{ top: 20, right: 30, left: 100, bottom: 140 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                <XAxis dataKey="date" allowDuplicatedCategory={false} {...defaultXAxisProps} />
+                <YAxis {...defaultYAxisProps} />
+                <RechartsTooltip formatter={(val: number) => val.toLocaleString() + " ریال"} />
+                <Legend />
+                {costTrendData.series.map((s: any, idx: number) => (
+                   <Line 
+                      key={s.code} 
+                      data={s.data} 
+                      type="monotone" 
+                      dataKey="price" 
+                      name={s.name} 
+                      stroke={['#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6'][idx % 5]} 
+                      strokeWidth={3}
+                      activeDot={{ r: 6 }}
+                   />
+                ))}
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
+

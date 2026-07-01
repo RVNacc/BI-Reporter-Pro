@@ -98,7 +98,7 @@ export default function FinanceReportsView() {
         ))}
       </div>
 
-      <div className="flex-1 bg-white rounded-xl border border-slate-200 shadow-sm p-6 flex flex-col h-full min-h-[400px]">
+      <div className="flex-1 bg-white rounded-xl border border-slate-200 shadow-sm p-6 flex flex-col h-full min-h-[450px]">
         {activeTab === "treasury" && data && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 w-full max-w-4xl relative">
             <div className="absolute top-0 right-0 -mt-2">
