@@ -69,27 +69,10 @@ export default function SalesReportsView() {
 
   const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899', '#f97316'];
 
+  if (!data) return <div className="p-6 flex justify-center items-center h-full text-slate-500 font-medium">در حال بارگذاری...</div>;
   const isEmptyData = data && 
     (!data.basketL1 || data.basketL1.length === 0);
 
-  if (isEmptyData) {
-    return (
-      <div className="p-6 h-full flex flex-col space-y-6">
-        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col md:flex-row justify-between md:items-center gap-4">
-          <AdvancedPeriodFilter
-            value={period}
-            onChange={setPeriod}
-            availableYears={periods.map((p:any) => p.value.startsWith('Y:') ? p.value.substring(2) : null).filter(Boolean) as string[]}
-          />
-        </div>
-        <div className="flex flex-col items-center justify-center min-h-[450px] border border-slate-200 rounded-xl bg-white shadow-sm p-10">
-          <ShoppingCart size={64} className="text-slate-200 mb-6" />
-          <p className="text-lg text-slate-500 font-bold mb-2">داده‌ای یافت نشد.</p>
-          <p className="text-slate-400 font-medium">هیچ فایل فروش یا مرجوعی بارگذاری نشده است.</p>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="p-6 md:p-8 h-full flex flex-col overflow-auto print:overflow-visible print:h-auto">
@@ -114,7 +97,7 @@ export default function SalesReportsView() {
           <AdvancedPeriodFilter value={period} onChange={setPeriod} availableYears={periods.map((p:any) => p.value.startsWith('Y:') ? p.value.substring(2) : null).filter(Boolean) as string[]} />
         </div>
       </div>
-
+      
       <div className="flex bg-white rounded-lg p-1 border border-slate-200 mb-6 shrink-0 w-max flex-wrap gap-1">
         {tabs.map((tab) => (
           <button
@@ -132,6 +115,13 @@ export default function SalesReportsView() {
         ))}
       </div>
 
+      {isEmptyData ? (
+        <div className="flex flex-col items-center justify-center min-h-[450px] border border-slate-200 rounded-xl bg-white shadow-sm p-10 flex-1">
+          <ShoppingCart size={64} className="text-slate-200 mb-6" />
+          <p className="text-lg text-slate-500 font-bold mb-2">داده‌ای یافت نشد.</p>
+          <p className="text-slate-400 font-medium">هیچ فایل فروش یا مرجوعی بارگذاری نشده است.</p>
+        </div>
+      ) : (
       <div className="flex-1 bg-white rounded-xl border border-slate-200 shadow-sm p-6 flex flex-col min-h-[450px]">
         
         {/* === BASKET TAB === */}
@@ -151,7 +141,7 @@ export default function SalesReportsView() {
 <ResponsiveContainer width="100%" height="100%">
 <LineChart data={data.basketL1} margin={{ top: 20, right: 30, left: 100, bottom: 140 }}>
                            <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                           <XAxis dataKey="name" angle={-45} textAnchor="end" height={160} tickFormatter={(v) => v && String(v).length > 25 ? String(v).substring(0, 25) + "..." : v} tick={{fontSize: 12, fontWeight: "bold", dy: 10, dx: -10, fill: "#475569"}} interval={0} axisLine={false} tickLine={false} />
+                           <XAxis dataKey="name" angle={-45} textAnchor="end" height={160} tickFormatter={(v) => v && String(v).length > 25 ? String(v).substring(0, 25) + "..." : v} tick={{fontSize: 12, fontWeight: "bold", dy: 10, dx: -10, fill: "#475569", direction: "ltr"}} interval={0} axisLine={false} tickLine={false} />
                            <YAxis {...defaultYAxisProps} />
                            <RechartsTooltip formatter={(v:number)=>formatRial(v)}/>
                            <Line type="monotone" dataKey="netAmt" stroke="#3b82f6" strokeWidth={3} dot={{r:4}} />
@@ -172,7 +162,7 @@ export default function SalesReportsView() {
                              cy="50%" 
                              outerRadius={70}
                            >
-                              {data.basketL1.map((e:any, i:number) => <Cell key={`cell-${i}`} fill={COLORS[i%COLORS.length]}/>)}
+                              {data?.basketL1?.map((e:any, i:number) => <Cell key={`cell-${i}`} fill={COLORS[i%COLORS.length]}/>)}
                            </Pie>
                            <RechartsTooltip formatter={(v:number)=>formatQty(v)}/>
                            <Legend verticalAlign="bottom" height={36}/>
@@ -220,7 +210,7 @@ export default function SalesReportsView() {
 <ResponsiveContainer width="100%" height="100%">
 <BarChart data={data.basketL2.slice(0,10)} margin={{ top: 20, right: 30, left: 100, bottom: 140 }}>
                            <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                           <XAxis dataKey="name" angle={-45} textAnchor="end" height={160} tickFormatter={(v) => v && String(v).length > 25 ? String(v).substring(0, 25) + "..." : v} tick={{fontSize: 12, fontWeight: "bold", dy: 10, dx: -10, fill: "#475569"}} interval={0} axisLine={false} tickLine={false} />
+                           <XAxis dataKey="name" angle={-45} textAnchor="end" height={160} tickFormatter={(v) => v && String(v).length > 25 ? String(v).substring(0, 25) + "..." : v} tick={{fontSize: 12, fontWeight: "bold", dy: 10, dx: -10, fill: "#475569", direction: "ltr"}} interval={0} axisLine={false} tickLine={false} />
                            <YAxis {...defaultYAxisProps} />
                            <RechartsTooltip formatter={(v:number)=>formatRial(v)}/>
                            <Bar dataKey="netAmt" fill="#10b981" radius={[4,4,0,0]} />
@@ -235,7 +225,7 @@ export default function SalesReportsView() {
 <ResponsiveContainer width="100%" height="100%">
 <LineChart data={data.basketL2.slice(0,10)} margin={{ top: 20, right: 30, left: 100, bottom: 140 }}>
                            <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                           <XAxis dataKey="name" angle={-45} textAnchor="end" height={160} tickFormatter={(v) => v && String(v).length > 25 ? String(v).substring(0, 25) + "..." : v} tick={{fontSize: 12, fontWeight: "bold", dy: 10, dx: -10, fill: "#475569"}} interval={0} axisLine={false} tickLine={false} />
+                           <XAxis dataKey="name" angle={-45} textAnchor="end" height={160} tickFormatter={(v) => v && String(v).length > 25 ? String(v).substring(0, 25) + "..." : v} tick={{fontSize: 12, fontWeight: "bold", dy: 10, dx: -10, fill: "#475569", direction: "ltr"}} interval={0} axisLine={false} tickLine={false} />
                            <YAxis {...defaultYAxisProps} />
                            <RechartsTooltip formatter={(v:number)=>formatQty(v)}/>
                            <Line type="monotone" dataKey="netQty" stroke="#f59e0b" strokeWidth={3} dot={{r:4}} />
@@ -285,7 +275,7 @@ export default function SalesReportsView() {
 <ResponsiveContainer width="100%" height="100%">
 <BarChart data={data.profitL1} margin={{ top: 20, right: 30, left: 100, bottom: 140 }}>
                     <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                    <XAxis dataKey="name" angle={-45} textAnchor="end" height={160} tickFormatter={(v) => v && String(v).length > 25 ? String(v).substring(0, 25) + "..." : v} tick={{fontSize: 12, fontWeight: "bold", dy: 10, dx: -10, fill: "#475569"}} interval={0} axisLine={false} tickLine={false} />
+                    <XAxis dataKey="name" angle={-45} textAnchor="end" height={160} tickFormatter={(v) => v && String(v).length > 25 ? String(v).substring(0, 25) + "..." : v} tick={{fontSize: 12, fontWeight: "bold", dy: 10, dx: -10, fill: "#475569", direction: "ltr"}} interval={0} axisLine={false} tickLine={false} />
                     <YAxis {...defaultYAxisProps} />
                     <RechartsTooltip formatter={(v:number)=>formatRial(v)}/>
                     <Legend />
@@ -343,7 +333,7 @@ export default function SalesReportsView() {
 <ResponsiveContainer width="100%" height="100%">
 <BarChart data={data.topReturnedCatL1} margin={{ top: 20, right: 30, left: 100, bottom: 140 }}>
                            <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                           <XAxis dataKey="name" angle={-45} textAnchor="end" height={160} tickFormatter={(v) => v && String(v).length > 25 ? String(v).substring(0, 25) + "..." : v} tick={{fontSize: 12, fontWeight: "bold", dy: 10, dx: -10, fill: "#475569"}} interval={0} axisLine={false} tickLine={false} />
+                           <XAxis dataKey="name" angle={-45} textAnchor="end" height={160} tickFormatter={(v) => v && String(v).length > 25 ? String(v).substring(0, 25) + "..." : v} tick={{fontSize: 12, fontWeight: "bold", dy: 10, dx: -10, fill: "#475569", direction: "ltr"}} interval={0} axisLine={false} tickLine={false} />
                            <YAxis {...defaultYAxisProps} />
                            <RechartsTooltip formatter={(v:number)=>formatRial(v)}/>
                            <Bar dataKey="returnAmt" name="مبلغ برگشتی" fill="#ef4444" radius={[4,4,0,0]} />
@@ -419,7 +409,7 @@ export default function SalesReportsView() {
                     <YAxis {...defaultYAxisProps} />
                     <RechartsTooltip formatter={(val: number) => val + " تراکنش"} labelFormatter={(val) => "ساعت " + val} />
                     <Bar dataKey="count" radius={[4, 4, 0, 0]} name="تعداد">
-                      {data.trafficArr.map((entry: any, index: number) => (
+                      {data?.trafficArr?.map((entry: any, index: number) => (
                         <Cell key={`cell-${index}`} fill="#3b82f6" />
                       ))}
                     </Bar>
@@ -442,6 +432,7 @@ export default function SalesReportsView() {
           </div>
         )}
       </div>
+      )}
     </div>
   );
 }

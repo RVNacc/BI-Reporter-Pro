@@ -66,6 +66,7 @@ export default function FinanceReportsView() {
     },
   ];
 
+  if (!data) return <div className="p-6 flex justify-center items-center h-full text-slate-500 font-medium">در حال بارگذاری...</div>;
   if (data?.error) return <div className="p-10 text-center text-red-500">{data.error}</div>;
   return (
     <div className="p-6 md:p-8 h-full flex flex-col overflow-auto print:overflow-visible print:h-auto">
@@ -169,7 +170,7 @@ export default function FinanceReportsView() {
                     </tr>
                   </thead>
                   <tbody className="divide-y text-slate-700 border-b border-slate-200">
-                    {data.marginArr.map((item: any, i: number) => (
+                    {data?.marginArr?.map((item: any, i: number) => (
                       <tr
                         key={i}
                         className="hover:bg-slate-50 transition-colors"
@@ -241,7 +242,7 @@ export default function FinanceReportsView() {
                     </tr>
                   </thead>
                   <tbody className="divide-y text-slate-700">
-                    {data.agingArr.map((item: any, i: number) => (
+                    {data?.agingArr?.map((item: any, i: number) => (
                       <tr
                         key={i}
                         className="hover:bg-slate-50 transition-colors"

@@ -69,6 +69,7 @@ export default function InventoryReportsView() {
 
   const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899', '#f97316'];
 
+  if (!data) return <div className="p-6 flex justify-center items-center h-full text-slate-500 font-medium">در حال بارگذاری...</div>;
   if (data?.error) {
     return (
       <div className="p-10 text-center text-red-500 font-bold bg-white m-6 rounded-lg shadow-sm border border-red-100">
@@ -130,7 +131,7 @@ export default function InventoryReportsView() {
                      <ResponsiveContainer width="100%" height="100%">
                         <BarChart data={data.retL1?.slice(0,5)} margin={{ top: 20, right: 30, left: 100, bottom: 140 }}>
                            <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                           <XAxis dataKey="name" angle={-45} textAnchor="end" height={160} tickFormatter={(v) => v && String(v).length > 25 ? String(v).substring(0, 25) + "..." : v} tick={{fontSize: 12, fontWeight: "bold", dy: 10, dx: -10, fill: "#475569"}} interval={0} axisLine={false} tickLine={false} />
+                           <XAxis dataKey="name" angle={-45} textAnchor="end" height={160} tickFormatter={(v) => v && String(v).length > 25 ? String(v).substring(0, 25) + "..." : v} tick={{fontSize: 12, fontWeight: "bold", dy: 10, dx: -10, fill: "#475569", direction: "ltr"}} interval={0} axisLine={false} tickLine={false} />
                            <YAxis {...defaultYAxisProps} />
                            <RechartsTooltip formatter={(v:number)=>formatRial(v)}/>
                            <Bar dataKey="amt" name="ارزش ریالی مرجوعی" fill="#ef4444" radius={[4,4,0,0]} />
@@ -143,7 +144,7 @@ export default function InventoryReportsView() {
                      <ResponsiveContainer width="100%" height="100%">
                         <LineChart data={data.retL2?.slice(0,5)} margin={{ top: 20, right: 30, left: 100, bottom: 140 }}>
                            <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                           <XAxis dataKey="name" angle={-45} textAnchor="end" height={160} tickFormatter={(v) => v && String(v).length > 25 ? String(v).substring(0, 25) + "..." : v} tick={{fontSize: 12, fontWeight: "bold", dy: 10, dx: -10, fill: "#475569"}} interval={0} axisLine={false} tickLine={false} />
+                           <XAxis dataKey="name" angle={-45} textAnchor="end" height={160} tickFormatter={(v) => v && String(v).length > 25 ? String(v).substring(0, 25) + "..." : v} tick={{fontSize: 12, fontWeight: "bold", dy: 10, dx: -10, fill: "#475569", direction: "ltr"}} interval={0} axisLine={false} tickLine={false} />
                            <YAxis {...defaultYAxisProps} />
                            <RechartsTooltip formatter={(v:number)=>formatQty(v)}/>
                            <Line type="monotone" dataKey="qty" stroke="#f59e0b" strokeWidth={3} dot={{r:4}} name="تعداد مرجوعی" />

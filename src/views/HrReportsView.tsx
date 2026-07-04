@@ -98,6 +98,7 @@ export default function HrReportsView() {
     },
   ];
 
+  if (!data) return <div className="p-6 flex justify-center items-center h-full text-slate-500 font-medium">در حال بارگذاری...</div>;
   const isEmptyData = data && 
     (!data.hrAnalytics || data.hrAnalytics.length === 0) &&
     (!data.hourlyArr || data.hourlyArr.length === 0);
@@ -204,7 +205,7 @@ export default function HrReportsView() {
                     </tr>
                   </thead>
                   <tbody className="divide-y text-slate-700">
-                    {data.hrAnalytics.map((item: any, i: number) => (
+                    {data?.hrAnalytics?.map((item: any, i: number) => (
                       <tr key={i} className="hover:bg-slate-50 transition-colors">
                         <td className="py-3 px-4 font-bold text-slate-400">#{i+1}</td>
                         <td className="py-3 px-4 font-bold text-fuchsia-700 flex items-center gap-2">
@@ -258,7 +259,7 @@ export default function HrReportsView() {
             
             {data.hrAnalytics?.length > 0 ? (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {data.hrAnalytics.map((item: any, i: number) => {
+                {data?.hrAnalytics?.map((item: any, i: number) => {
                   const efficiencyRate = Math.min(Math.round((item.itemsPerMinute / 10) * 100), 100); // Ex: if >10 items/min is 100%
                   
                   return (
@@ -338,7 +339,7 @@ export default function HrReportsView() {
                   </tr>
                 </thead>
                 <tbody className="divide-y text-slate-700">
-                  {data.hrAnalytics.map((item: any, i: number) => (
+                  {data?.hrAnalytics?.map((item: any, i: number) => (
                     <tr key={i} className="hover:bg-slate-50 transition-colors">
                       <td className="py-3 px-4 font-bold text-slate-800">{item.employeeName}</td>
                       <td className="py-3 px-4 text-center font-semibold">{item.workingDays} روز</td>
@@ -378,7 +379,7 @@ export default function HrReportsView() {
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {data.hrAnalytics.filter((i:any) => i.invoiceCount > 0).map((item: any, i: number) => (
+                {data?.hrAnalytics?.filter((i:any) => i.invoiceCount > 0).map((item: any, i: number) => (
                   <div key={i} className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm hover:shadow-md transition-shadow relative">
                       <div className="flex justify-between items-start mb-4">
                         <div>
@@ -507,24 +508,24 @@ export default function HrReportsView() {
                 />
              </div>
 
-             {data.orgStats ? (
+             {data?.orgStats ? (
                <>
                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
                     <div className="bg-white border text-center border-slate-200 rounded-xl p-4 shadow-sm">
                        <span className="block text-xs text-slate-500 font-medium mb-1">مجموع پرسنل ثبت شده</span>
-                       <span className="block text-2xl font-bold text-slate-700">{data.orgStats.totalEmployees || 0}</span>
+                       <span className="block text-2xl font-bold text-slate-700">{data?.orgStats.totalEmployees || 0}</span>
                     </div>
                     <div className="bg-indigo-50 text-center border border-indigo-100 rounded-xl p-4 shadow-sm">
                        <span className="block text-xs text-indigo-500 font-medium mb-1">پرسنل فعال مدار</span>
-                       <span className="block text-2xl font-bold text-indigo-700">{data.orgStats.activeEmployees || 0}</span>
+                       <span className="block text-2xl font-bold text-indigo-700">{data?.orgStats.activeEmployees || 0}</span>
                     </div>
                     <div className="bg-rose-50 text-center border border-rose-100 rounded-xl p-4 shadow-sm">
                        <span className="block text-xs text-rose-500 font-medium mb-1">ترک کار / خروج (Leavers)</span>
-                       <span className="block text-2xl font-bold text-rose-600">{data.orgStats.leavers || 0}</span>
+                       <span className="block text-2xl font-bold text-rose-600">{data?.orgStats.leavers || 0}</span>
                     </div>
                     <div className="bg-emerald-50 text-center border border-emerald-100 rounded-xl p-4 shadow-sm">
                        <span className="block text-xs text-emerald-600 font-medium mb-1">جذب جدید در دوره (Joiners)</span>
-                       <span className="block text-2xl font-bold text-emerald-600">{data.orgStats.newJoiners || 0}</span>
+                       <span className="block text-2xl font-bold text-emerald-600">{data?.orgStats.newJoiners || 0}</span>
                     </div>
                  </div>
 
@@ -535,7 +536,7 @@ export default function HrReportsView() {
                          <ResponsiveContainer width="100%" height="100%">
                            <PieChart>
                              <Pie
-                               data={Object.entries(data.orgStats.rolesDistribution || {}).map(([name, value]) => ({ name, value }))}
+                               data={Object.entries(data?.orgStats.rolesDistribution || {}).map(([name, value]) => ({ name, value }))}
                                cx="50%"
                                cy="50%"
                                innerRadius={60}
@@ -543,7 +544,7 @@ export default function HrReportsView() {
                                paddingAngle={5}
                                dataKey="value"
                              >
-                               {Object.keys(data.orgStats.rolesDistribution || {}).map((_, index) => (
+                               {Object.keys(data?.orgStats.rolesDistribution || {}).map((_, index) => (
                                  <Cell key={`cell-${index}`} fill={["#8b5cf6", "#3b82f6", "#10b981", "#f59e0b", "#ef4444"][index % 5]} />
                                ))}
                              </Pie>
@@ -559,7 +560,7 @@ export default function HrReportsView() {
                          <ResponsiveContainer width="100%" height="100%">
                            <PieChart>
                              <Pie
-                               data={Object.entries(data.orgStats.costCenterDistribution || {}).map(([name, value]) => ({ name, value }))}
+                               data={Object.entries(data?.orgStats.costCenterDistribution || {}).map(([name, value]) => ({ name, value }))}
                                cx="50%"
                                cy="50%"
                                innerRadius={60}
@@ -567,7 +568,7 @@ export default function HrReportsView() {
                                paddingAngle={5}
                                dataKey="value"
                              >
-                               {Object.keys(data.orgStats.costCenterDistribution || {}).map((_, index) => (
+                               {Object.keys(data?.orgStats.costCenterDistribution || {}).map((_, index) => (
                                  <Cell key={`cell-${index}`} fill={["#6366f1", "#14b8a6", "#f43f5e", "#8b5cf6", "#eab308"][index % 5]} />
                                ))}
                              </Pie>
@@ -591,7 +592,7 @@ export default function HrReportsView() {
                         </tr>
                       </thead>
                       <tbody className="divide-y text-slate-700">
-                        {data.hrAnalytics.map((item: any, i: number) => (
+                        {data?.hrAnalytics?.map((item: any, i: number) => (
                           <tr key={i} className="hover:bg-slate-50 transition-colors">
                             <td className="py-3 px-4 font-bold text-slate-800 flex items-center gap-2">
                                {item.employeeName}

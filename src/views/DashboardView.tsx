@@ -169,7 +169,7 @@ export default function DashboardView() {
                 />
                 <XAxis
                   dataKey="name"
-                  angle={-45} textAnchor="end" height={160} tickFormatter={(v) => v && String(v).length > 25 ? String(v).substring(0, 25) + "..." : v} tick={{fontSize: 12, fontWeight: "bold", dy: 10, dx: -10, fill: "#475569"}} interval={0}
+                  angle={-45} textAnchor="end" height={160} tickFormatter={(v) => v && String(v).length > 25 ? String(v).substring(0, 25) + "..." : v} tick={{fontSize: 12, fontWeight: "bold", dy: 10, dx: -10, fill: "#475569", direction: "ltr"}} interval={0}
                   axisLine={false}
                   tickLine={false}
                 />
@@ -226,7 +226,7 @@ export default function DashboardView() {
                   formatter={(val: number) => val.toLocaleString() + " ریال"}
                 />
                 <Bar dataKey="value" radius={[0, 4, 4, 0]} name="ارزش تراکنش">
-                  {data.paretoData.map((entry: any, index: number) => (
+                  {data?.paretoData?.map((entry: any, index: number) => (
                     <Cell
                       key={`cell-${index}`}
                       fill={COLORS[index % COLORS.length]}

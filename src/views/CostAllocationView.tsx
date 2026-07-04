@@ -174,6 +174,7 @@ export default function CostAllocationView() {
 
   const displayCenters = reportData?.costCenters || costCenters;
   
+  if (!reportData) return <div className="p-6 flex justify-center items-center h-full text-slate-500 font-medium">در حال بارگذاری...</div>;
   return (
     <div className="p-8 h-full flex flex-col justify-start overflow-auto print:overflow-visible print:h-auto print:p-2 print:block">
       <div className="mb-6 flex flex-col md:flex-row justify-between md:items-start gap-4">

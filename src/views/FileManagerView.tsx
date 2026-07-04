@@ -325,7 +325,7 @@ export default function FileManagerView() {
               مدیریت منابع تغذیه شده
             </h2>
             <div className="flex gap-2 items-center">
-               <input type="file" ref={fileInputRef} className="hidden" accept=".db,.sqlite" onChange={handleDatabaseRestore} />
+               <input type="file" ref={fileInputRef} className="hidden" accept=".db,.sqlite,.duckdb" onChange={handleDatabaseRestore} />
                <button onClick={() => fileInputRef.current?.click()} className="flex items-center gap-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors border border-rose-200">
                  بازیابی پایگاه داده
                </button>
@@ -334,7 +334,7 @@ export default function FileManagerView() {
                  download
                  className="flex items-center gap-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors border border-indigo-200"
                >
-                 دانلود نسخه پشتیبان (SQLite)
+                 دانلود نسخه پشتیبان
                </a>
                <span className="text-xs font-medium bg-blue-100 text-blue-700 px-3 py-1 rounded-full">
                  {files.length} منبع داده

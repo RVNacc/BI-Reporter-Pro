@@ -131,7 +131,8 @@ export default function ParetoReportsView() {
   const renderParetoChart = (chartData: any[], valueKey: string, nameKey: string, title: string) => {
      if (!chartData || chartData.length === 0) return null;
      const topN = chartData.slice(0, 30); // show top 30 in chart
-     if (data?.error) return <div className="p-10 text-center text-red-500">{data.error}</div>;
+     if (!data) return <div className="p-6 flex justify-center items-center h-full text-slate-500 font-medium">در حال بارگذاری...</div>;
+  if (data?.error) return <div className="p-10 text-center text-red-500">{data.error}</div>;
   return (
     <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
            <h3 className="text-lg font-semibold text-slate-800 mb-4">{title}</h3>
@@ -140,7 +141,7 @@ export default function ParetoReportsView() {
 <ResponsiveContainer width="100%" height="100%">
 <ComposedChart data={topN} margin={{ top: 20, right: 30, left: 100, bottom: 140 }}>
                     <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
-                    <XAxis dataKey={nameKey} angle={-45} textAnchor="end" height={180} tickFormatter={(v) => v && v.length > 30 ? v.substring(0, 30) + '...' : v} tick={{fontSize: 12, fontWeight: 'bold', dy: 10, dx: -10, fill: '#1e293b'}} interval={0} />
+                    <XAxis dataKey={nameKey} angle={-45} textAnchor="end" height={180} tickFormatter={(v) => v && v.length > 30 ? v.substring(0, 30) + '...' : v} tick={{fontSize: 12, fontWeight: "bold", dy: 10, dx: -10, fill: "#1e293b", direction: "ltr"}} interval={0} />
                     <YAxis yAxisId="left" {...defaultYAxisProps} orientation="left" />
                     <YAxis yAxisId="right" {...defaultYAxisProps} />
                     <Tooltip formatter={(val: number, name: string) => [name === 'درصد تجمعی' ? val.toFixed(2) + '%' : val.toLocaleString(), name]} />
@@ -399,7 +400,7 @@ export default function ParetoReportsView() {
                             </tr>
                          </thead>
                          <tbody>
-                            {data.invoiceClasses.map((cls: any, i: number) => (
+                            {data?.invoiceClasses?.map((cls: any, i: number) => (
                                <tr key={i} className={i % 2 === 0 ? "bg-white" : "bg-slate-50"}>
                                   <td className="px-4 py-2 border border-slate-300 dir-ltr text-right">{cls.range}</td>
                                   <td className="px-4 py-2 border border-slate-300 text-center">{cls.count.toLocaleString()}</td>

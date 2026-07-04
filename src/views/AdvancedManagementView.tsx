@@ -137,6 +137,7 @@ export default function AdvancedManagementView() {
     document.body.removeChild(link);
   };
 
+  if (!data) return <div className="p-6 flex justify-center items-center h-full text-slate-500 font-medium">در حال بارگذاری...</div>;
   const isEmptyData = data && 
     (!data.reconciliationList || data.reconciliationList.length === 0) && 
     (!data.weekdayArr || data.weekdayArr.every((d: any) => d.txCount === 0));

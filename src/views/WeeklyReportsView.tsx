@@ -43,14 +43,14 @@ export function WeeklyReportsView() {
   }, [period, netMode]);
 
   const handleExportCSV = () => {
-     if (!data || !data.rows || !data.weeks) return;
+     if (!data || !data.rows || !data?.weeks) return;
      let csv = "سطح ۱,سطح ۲,مرکز فعالیت";
-     const weeksContent = data.weeks.map((w: number) => `هفته ${w} - رشد,هفته ${w} - ${mode === "amt" ? "ریال" : "تعداد"}`).join(",");
+     const weeksContent = data?.weeks?.map((w: number) => `هفته ${w} - رشد,هفته ${w} - ${mode === "amt" ? "ریال" : "تعداد"}`).join(",");
      csv += "," + weeksContent + "\n";
 
      rows.forEach((row: any) => {
          let line = `"${row.l1}","${row.l2}","${row.ac}"`;
-         data.weeks.forEach((w: number) => {
+         data?.weeks.forEach((w: number) => {
              const g = mode === "amt" ? row.wAmt[`g${w}`] : row.wQty[`g${w}`];
              const val = mode === "amt" ? row.wAmt[`w${w}`] : row.wQty[`w${w}`];
              const gVal = w > 1 ? (g * 100).toFixed(0) + '%' : '-';
@@ -70,7 +70,7 @@ export function WeeklyReportsView() {
 
   if (!data) return <div className="p-6 text-slate-500">در حال بارگذاری...</div>;
   if (data.error) return <div className="p-6 text-rose-500">خطا: {data.error}</div>;
-  if (!data.rows || !data.weeks) return <div className="p-6 text-slate-500">داده‌ای یافت نشد.</div>;
+  if (!data.rows || !data?.weeks) return <div className="p-6 text-slate-500">داده‌ای یافت نشد.</div>;
 
   const rows = data.rows.filter((r: any) => 
      (r.l1 || "").includes(search) || (r.l2 || "").includes(search) || (r.ac || "").includes(search)
@@ -78,7 +78,7 @@ export function WeeklyReportsView() {
 
   // Group chart data by week
   let chartData: any[] = [];
-  data.weeks.slice().reverse().forEach((w: number) => {
+  data?.weeks.slice().reverse().forEach((w: number) => {
       let totalAmt = 0;
       let totalQty = 0;
       rows.forEach((r: any) => {
@@ -160,12 +160,12 @@ export function WeeklyReportsView() {
                     <th className="p-2 border-l border-slate-200 print:border-l-black border-b print:border-b-black text-center align-middle" rowSpan={2}>سطح ۱</th>
                     <th className="p-2 border-l border-slate-200 print:border-l-black border-b print:border-b-black text-center align-middle" rowSpan={2}>سطح ۲</th>
                     <th className="p-2 border-l border-slate-200 print:border-l-black border-b print:border-b-black text-center align-middle" rowSpan={2}>مرکز فعالیت</th>
-                    <th className="p-2 border-b text-center border-slate-300 print:border-b-black text-slate-800 print:text-black" colSpan={data.weeks.length * 2}>
+                    <th className="p-2 border-b text-center border-slate-300 print:border-b-black text-slate-800 print:text-black" colSpan={data?.weeks.length * 2}>
                         هفته (قدیمی‌ترین به جدیدترین)
                     </th>
                  </tr>
                  <tr>
-                    {data.weeks.map((w: number) => (
+                    {data?.weeks?.map((w: number) => (
                        <React.Fragment key={w}>
                           <th className="p-1 px-2 border-l border-b border-t border-slate-200 print:border-l-black print:border-b-black text-center text-[11px] md:text-[13px]">
                              <span className="block text-white select-none">-</span>
@@ -185,7 +185,7 @@ export function WeeklyReportsView() {
                        <td className="p-2 border-l border-slate-200 print:border-l-black text-right whitespace-normal break-words w-[120px] max-w-[120px] print:w-auto print:max-w-none">{row.l1}</td>
                        <td className="p-2 border-l border-slate-200 print:border-l-black text-right whitespace-normal break-words w-[120px] max-w-[120px] print:w-auto print:max-w-none">{row.l2}</td>
                        <td className="p-2 border-l border-slate-200 print:border-l-black text-right whitespace-normal break-words w-[100px] max-w-[100px] print:w-auto print:max-w-none text-[13px] font-bold">{row.ac}</td>
-                       {data.weeks.map((w: number) => {
+                       {data?.weeks?.map((w: number) => {
                            const val = mode === "amt" ? row.wAmt[`w${w}`] : row.wQty[`w${w}`];
                            const g = mode === "amt" ? row.wAmt[`g${w}`] : row.wQty[`g${w}`];
                            const gVal = (g * 100).toFixed(0) + '%';
@@ -210,7 +210,7 @@ export function WeeklyReportsView() {
                  ))}
                  {rows.length === 0 && (
                     <tr>
-                       <td colSpan={data.weeks.length * 2 + 3} className="p-8 text-center text-slate-500">
+                       <td colSpan={data?.weeks.length * 2 + 3} className="p-8 text-center text-slate-500">
                           رکوردی یافت نشد.
                        </td>
                     </tr>
@@ -220,40 +220,40 @@ export function WeeklyReportsView() {
         </div>
       </div>
 
-      {data.movers && data.weeks.length > 1 && (
+      {data?.movers && data?.weeks.length > 1 && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 print:hidden mt-6">
            <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4">
               <h3 className="font-bold text-slate-700 border-b border-slate-100 pb-2 mb-3 text-emerald-600 flex items-center justify-between">
-                 بیشترین رشد نسبی (هفته {data.weeks[data.weeks.length-1]} به {data.weeks[data.weeks.length-2]})
+                 بیشترین رشد نسبی (هفته {data?.weeks[data?.weeks.length-1]} به {data?.weeks[data?.weeks.length-2]})
                  <span className="text-xs font-normal text-slate-500">{(mode === 'amt' ? "ریالی" : "تعدادی")}</span>
               </h3>
               <div className="overflow-y-auto max-h-[450px]">
                  <ul className="space-y-2">
-                    {data.movers[mode === 'amt' ? 'topGrowersAmt' : 'topGrowersQty'].slice(0,10).map((m: any, i: number) => (
+                    {data?.movers?.[mode === 'amt' ? 'topGrowersAmt' : 'topGrowersQty'].slice(0,10).map((m: any, i: number) => (
                         <li key={i} className="flex justify-between items-center text-sm p-2 hover:bg-slate-50 rounded">
                            <span className="text-slate-700 truncate w-2/3" title={m.name}>{i+1}. {m.name}</span>
                            <span className="font-bold text-emerald-600">+{mode === 'amt' ? formatRial(m.diffAmt) : formatQty(m.diffQty)}</span>
                         </li>
                     ))}
-                    {data.movers[mode === 'amt' ? 'topGrowersAmt' : 'topGrowersQty'].length === 0 && <div className="text-center text-slate-500 py-4">موردی یافت نشد</div>}
+                    {data?.movers?.[mode === 'amt' ? 'topGrowersAmt' : 'topGrowersQty'].length === 0 && <div className="text-center text-slate-500 py-4">موردی یافت نشد</div>}
                  </ul>
               </div>
            </div>
            
            <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4">
               <h3 className="font-bold text-slate-700 border-b border-slate-100 pb-2 mb-3 text-rose-600 flex items-center justify-between">
-                 بیشترین افت نسبی (هفته {data.weeks[data.weeks.length-1]} به {data.weeks[data.weeks.length-2]})
+                 بیشترین افت نسبی (هفته {data?.weeks[data?.weeks.length-1]} به {data?.weeks[data?.weeks.length-2]})
                  <span className="text-xs font-normal text-slate-500">{(mode === 'amt' ? "ریالی" : "تعدادی")}</span>
               </h3>
               <div className="overflow-y-auto max-h-[450px]">
                  <ul className="space-y-2">
-                    {data.movers[mode === 'amt' ? 'topDeclinersAmt' : 'topDeclinersQty'].slice(0,10).map((m: any, i: number) => (
+                    {data?.movers?.[mode === 'amt' ? 'topDeclinersAmt' : 'topDeclinersQty'].slice(0,10).map((m: any, i: number) => (
                         <li key={i} className="flex justify-between items-center text-sm p-2 hover:bg-slate-50 rounded border-r-2 border-r-rose-400">
                            <span className="text-slate-700 truncate w-2/3" title={m.name}>{i+1}. {m.name}</span>
                            <span className="font-bold text-rose-600">{mode === 'amt' ? formatRial(m.diffAmt) : formatQty(m.diffQty)}</span>
                         </li>
                     ))}
-                    {data.movers[mode === 'amt' ? 'topDeclinersAmt' : 'topDeclinersQty'].length === 0 && <div className="text-center text-slate-500 py-4">موردی یافت نشد</div>}
+                    {data?.movers?.[mode === 'amt' ? 'topDeclinersAmt' : 'topDeclinersQty'].length === 0 && <div className="text-center text-slate-500 py-4">موردی یافت نشد</div>}
                  </ul>
               </div>
            </div>

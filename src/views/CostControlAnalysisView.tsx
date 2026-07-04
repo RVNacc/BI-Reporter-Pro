@@ -3,6 +3,7 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, LineChart, Line, Legend 
 } from 'recharts';
+import { MultiSelect as PeriodSelect } from "../components/MultiSelect";
 import { TrendingUp, TrendingDown, DollarSign, PieChart as PieChartIcon, Activity, ListFilter, AlertCircle } from 'lucide-react';
 
 interface CostAnalysisData {
@@ -11,6 +12,8 @@ interface CostAnalysisData {
   percentOfSales: number;
   percentOfNetIncome: number;
   trendPercent: number;
+  compPercentOfSales?: number;
+  compAmount?: number;
   avgAmount?: number;
   isAnomaly?: boolean;
 }
@@ -73,6 +76,20 @@ const MultiSelect = ({ options, selected, onChange, placeholder }: any) => {
 };
 
 export default function CostControlAnalysisView() {
+
+const getPeriodLabel = (val: string, fallback: string) => {
+   if (!val) return fallback;
+   const p = periods.find(p => p.value === val);
+   return p ? p.label : fallback;
+};
+
+
+const formatPct = (val: number | undefined) => {
+   if (val === undefined || val === null) return '-';
+   if (val === 0) return '0%';
+   return Number(val).toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 3 }) + '%';
+};
+
   const [data, setData] = useState<{
     totalSales: number;
     netIncome: number;
@@ -95,6 +112,8 @@ export default function CostControlAnalysisView() {
   const [accountFilter, setAccountFilter] = useState<string[]>([]);
   const [tafsilFilter, setTafsilFilter] = useState<string[]>([]);
   const [comprehensiveViewType, setComprehensiveViewType] = useState<'table' | 'matrix'>('table');
+  const [matrixPivot, setMatrixPivot] = useState<'account-tafsil' | 'tafsil-account'>('account-tafsil');
+  const [matrixValue, setMatrixValue] = useState<'current' | 'compare' | 'trend'>('current');
   const [availableAccounts, setAvailableAccounts] = useState<string[]>([]);
   const [availableTafsils, setAvailableTafsils] = useState<string[]>([]);
 
@@ -182,7 +201,7 @@ export default function CostControlAnalysisView() {
     );
   }
 
-  const costDistribution = data?.costAnalysis.map((c, i) => ({
+  const costDistribution = data?.costAnalysis?.map((c, i) => ({
     name: c.account,
     value: c.amount,
     color: COLORS[i % COLORS.length]
@@ -204,6 +223,8 @@ export default function CostControlAnalysisView() {
     }
     return null;
   };
+
+  if (!data) return <div className="p-6 flex justify-center items-center h-full text-slate-500 font-medium">در حال بارگذاری...</div>;
 
   return (
     <div className="p-8 h-full flex flex-col justify-start overflow-auto bg-slate-50">
@@ -277,30 +298,24 @@ export default function CostControlAnalysisView() {
 
          <div className="flex flex-col gap-1 border-r border-slate-200 pr-4 ml-2">
             <span className="text-xs text-slate-500 mr-1">دوره گزارش</span>
-            <select
-               className="bg-slate-50 border rounded px-3 py-1.5 text-sm outline-none text-slate-700"
+            <PeriodSelect
+               className="min-w-[140px]"
+               options={[{label: 'همه دوره‌ها', value: ''}, ...periods]}
                value={selectedPeriod}
-               onChange={(e) => setSelectedPeriod(e.target.value)}
-            >
-               <option value="">همه دوره‌ها</option>
-               {periods.map((p, i) => (
-                  <option key={i} value={p.value}>{p.label}</option>
-               ))}
-            </select>
+               onChange={setSelectedPeriod}
+               placeholder="همه دوره‌ها"
+            />
          </div>
 
          <div className="flex flex-col gap-1">
             <span className="text-xs text-slate-500 mr-1">مقایسه با</span>
-            <select
-               className="bg-slate-50 border rounded px-3 py-1.5 text-sm outline-none text-slate-700"
+            <PeriodSelect
+               className="min-w-[140px]"
+               options={[{label: 'بدون مقایسه', value: ''}, ...periods]}
                value={comparePeriod}
-               onChange={(e) => setComparePeriod(e.target.value)}
-            >
-               <option value="">بدون مقایسه</option>
-               {periods.map((p, i) => (
-                  <option key={i} value={p.value}>{p.label}</option>
-               ))}
-            </select>
+               onChange={setComparePeriod}
+               placeholder="بدون مقایسه"
+            />
          </div>
       </div>
 
@@ -439,8 +454,8 @@ export default function CostControlAnalysisView() {
                   <ResponsiveContainer width="100%" height="100%">
                      <BarChart data={costDistribution} margin={{ top: 20, right: 30, left: 100, bottom: 140 }}>
                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
-                     <XAxis dataKey="name" angle={-45} textAnchor="end" height={160} tickFormatter={(v) => v && String(v).length > 25 ? String(v).substring(0, 25) + "..." : v} tick={{fontSize: 12, fontWeight: "bold", dy: 10, dx: -10, fill: "#475569"}} interval={0} axisLine={false} tickLine={false} />
-                     <YAxis orientation="left" width={100} axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#64748b', textAnchor: 'start', dx: -10 }} tickFormatter={(val) => (val / 1000000).toFixed(0) + 'm'} />
+                     <XAxis dataKey="name" angle={-45} textAnchor="end" height={160} tickFormatter={(v) => v && String(v).length > 25 ? String(v).substring(0, 25) + "..." : v} tick={{fontSize: 12, fontWeight: "bold", dy: 10, dx: -10, fill: "#475569", direction: "ltr"}} interval={0} axisLine={false} tickLine={false} />
+                     <YAxis orientation="left" width={100} axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: "#64748b", textAnchor: "end", dx: -10, direction: "ltr" }} tickFormatter={(val) => (val / 1000000).toFixed(0) + 'm'} />
                      <Tooltip content={<CustomTooltip />} />
                      <Bar dataKey="value" radius={[4, 4, 0, 0]} maxBarSize={50}>
                         {costDistribution.map((entry, index) => (
@@ -482,11 +497,11 @@ export default function CostControlAnalysisView() {
                   <ResponsiveContainer width="100%" height="100%">
                      <LineChart data={data.timelineData} margin={{ top: 10, right: 30, left: 100, bottom: 140 }}>
                         <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
-                        <XAxis dataKey="period" angle={-45} textAnchor="end" height={160} tickFormatter={(v) => v && String(v).length > 25 ? String(v).substring(0, 25) + "..." : v} tick={{fontSize: 12, fontWeight: "bold", dy: 10, dx: -10, fill: "#475569"}} interval={0} axisLine={false} tickLine={false} />
-                        <YAxis orientation="left" width={100} axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#64748b', textAnchor: 'start', dx: -10 }} tickFormatter={(val) => (val / 1000000).toFixed(0) + 'm'} />
+                        <XAxis dataKey="period" angle={-45} textAnchor="end" height={160} tickFormatter={(v) => v && String(v).length > 25 ? String(v).substring(0, 25) + "..." : v} tick={{fontSize: 12, fontWeight: "bold", dy: 10, dx: -10, fill: "#475569", direction: "ltr"}} interval={0} axisLine={false} tickLine={false} />
+                        <YAxis orientation="left" width={100} axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: "#64748b", textAnchor: "end", dx: -10, direction: "ltr" }} tickFormatter={(val) => (val / 1000000).toFixed(0) + 'm'} />
                         <Tooltip content={<CustomTooltip />} />
                         <Legend layout="horizontal" verticalAlign="bottom" align="center" wrapperStyle={{ fontSize: '12px', marginTop: '20px' }} />
-                        {data.topAccounts.map((acc, idx) => (
+                        {data?.topAccounts?.map((acc, idx) => (
                            <Line key={acc} type="monotone" dataKey={acc} name={acc} stroke={COLORS[idx % COLORS.length]} strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} />
                         ))}
                      </LineChart>
@@ -503,8 +518,8 @@ export default function CostControlAnalysisView() {
                    <ResponsiveContainer width="100%" height="100%">
                       <LineChart data={data.timelineData} margin={{ top: 10, right: 30, left: 100, bottom: 140 }}>
                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
-                         <XAxis dataKey="period" angle={-45} textAnchor="end" height={160} tickFormatter={(v) => v && String(v).length > 25 ? String(v).substring(0, 25) + "..." : v} tick={{fontSize: 12, fontWeight: "bold", dy: 10, dx: -10, fill: "#475569"}} interval={0} axisLine={false} tickLine={false} />
-                         <YAxis orientation="left" width={100} axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#64748b', textAnchor: 'start', dx: -10 }} tickFormatter={(val) => val.toFixed(1) + '%'} />
+                         <XAxis dataKey="period" angle={-45} textAnchor="end" height={160} tickFormatter={(v) => v && String(v).length > 25 ? String(v).substring(0, 25) + "..." : v} tick={{fontSize: 12, fontWeight: "bold", dy: 10, dx: -10, fill: "#475569", direction: "ltr"}} interval={0} axisLine={false} tickLine={false} />
+                         <YAxis orientation="left" width={100} axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: "#64748b", textAnchor: "end", dx: -10, direction: "ltr" }} tickFormatter={(val) => val.toFixed(1) + '%'} />
                          <Tooltip 
                             content={({ active, payload, label }: any) => {
                                if (active && payload && payload.length) {
@@ -534,7 +549,7 @@ export default function CostControlAnalysisView() {
                <button
                   onClick={() => {
                      const headers = ['سرفصل', 'مبلغ (ریال)', 'درصد از فروش', 'وضعیت هشدار (بیشتر از میانگین)'];
-                     const rows = data.costAnalysis.map(i => [
+                     const rows = data?.costAnalysis?.map(i => [
                         i.account || 'نامشخص',
                         i.amount,
                         i.percentOfSales.toFixed(1) + '%',
@@ -561,24 +576,32 @@ export default function CostControlAnalysisView() {
                   <thead className="bg-slate-100 text-slate-600 font-medium">
                      <tr>
                      <th className="px-6 py-4 rounded-tr-lg">{analysisField === 'tafsil' ? 'تفصیل هزینه' : 'سرفصل هزینه'}</th>
-                     <th className="px-6 py-4">مبلغ دوره (ریال)</th>
+                     <th className="px-6 py-4">مبلغ {selectedPeriod ? "انتخابی" : "دوره گزارش"} (ریال)</th>
+                     <th className="px-6 py-4">مبلغ {comparePeriod ? "مقایسه" : "دوره مقایسه"} (ریال)</th>
                      <th className="px-6 py-4">درصد از فروش</th>
-                     <th className="px-6 py-4">وضعیت هوشمند</th>
-                     <th className="px-6 py-4 text-center rounded-tl-lg">روند نسبت به {comparePeriod || 'دوره مقایسه'}</th>
+                     <th className="px-6 py-4">درصد از فروش (مقایسه)</th>
+                     <th className="px-6 py-4">وضعیت</th>
+                     <th className="px-6 py-4 text-center rounded-tl-lg">روند ({comparePeriod || 'مقایسه'})</th>
                      </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                     {data.costAnalysis.map((item, index) => (
+                     {data?.costAnalysis?.map((item, index) => (
                      <tr key={index} className="hover:bg-slate-50 transition-colors">
                         <td className="px-6 py-4 font-medium text-slate-800">{item.account || 'نامشخص'}</td>
                         <td className="px-6 py-4 font-mono text-slate-700">{Number(item.amount).toLocaleString()}</td>
+                        <td className="px-6 py-4 font-mono text-slate-500">{item.compAmount ? Number(item.compAmount).toLocaleString() : '-'}</td>
                         <td className="px-6 py-4">
                            <div className="flex items-center gap-2">
-                           <span className="font-medium text-slate-700 w-8">{item.percentOfSales.toFixed(1)}%</span>
+                              <span className="font-medium text-slate-700 w-12">{formatPct(item.percentOfSales)}</span>
+
                            <div className="w-24 h-2 bg-slate-200 rounded-full overflow-hidden">
                               <div className="h-full bg-blue-500 rounded-full" style={{ width: `${Math.min(item.percentOfSales, 100)}%` }}></div>
                            </div>
                            </div>
+                        
+                        </td>
+                        <td className="px-6 py-4 font-mono text-slate-600">
+                           {item.compPercentOfSales ? formatPct(item.compPercentOfSales) : '-'}
                         </td>
                         <td className="px-6 py-4">
                            {item.isAnomaly ? (
@@ -594,7 +617,7 @@ export default function CostControlAnalysisView() {
                            {item.trendPercent !== 0 ? (
                            <div className={`inline-flex items-center justify-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium ${item.trendPercent > 0 ? 'bg-rose-100 text-rose-700' : 'bg-emerald-100 text-emerald-700'}`}>
                               {item.trendPercent > 0 ? <TrendingUp size={14} /> : <TrendingDown size={14} />}
-                              <span dir="ltr">{Math.abs(item.trendPercent).toFixed(1)}%</span>
+                              <span dir="ltr">{formatPct(Math.abs(item.trendPercent))}</span>
                            </div>
                            ) : (
                            <span className="text-slate-400">-</span>
@@ -622,7 +645,31 @@ export default function CostControlAnalysisView() {
                   گزارش جامع ادغامی هزینه‌ها (معین و تفصیل)
                </h3>
                <div className="flex items-center gap-4">
-                  <div className="flex bg-slate-200 p-1 rounded-lg">
+                  <div className="flex items-center gap-3">
+                     {comprehensiveViewType === 'matrix' && (
+                        <>
+                           <select 
+                              className="text-sm border-slate-200 rounded-md py-1.5 pl-8 pr-3 text-slate-600 outline-none focus:ring-1 focus:ring-blue-500"
+                              value={matrixPivot}
+                              onChange={(e) => setMatrixPivot(e.target.value as any)}
+                           >
+                              <option value="account-tafsil">ردیف: معین / ستون: تفصیل</option>
+                              <option value="tafsil-account">ردیف: تفصیل / ستون: معین</option>
+                           </select>
+                           
+                           <select 
+                              className="text-sm border-slate-200 rounded-md py-1.5 pl-8 pr-3 text-slate-600 outline-none focus:ring-1 focus:ring-blue-500"
+                              value={matrixValue}
+                              onChange={(e) => setMatrixValue(e.target.value as any)}
+                           >
+                              <option value="current">مبلغ دوره گزارش</option>
+                              <option value="compare">مبلغ دوره مقایسه</option>
+<option value="compare-percent">درصد مقایسه</option>
+                              <option value="trend">درصد تغییر (روند)</option>
+                           </select>
+                        </>
+                     )}
+                     <div className="flex bg-slate-200 p-1 rounded-lg">
                      <button 
                         className={`px-3 py-1 text-sm rounded-md transition-all ${comprehensiveViewType === 'table' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-600 hover:text-slate-800'}`}
                         onClick={() => setComprehensiveViewType('table')}
@@ -636,15 +683,17 @@ export default function CostControlAnalysisView() {
                         ماتریسی
                      </button>
                   </div>
+                  </div>
                   <span className="text-sm text-slate-500 font-medium">مجموع هزینه‌ها: {comprehensiveData.reduce((acc, curr) => acc + (curr.total || 0), 0).toLocaleString()} ریال</span>
                   <button
                      onClick={() => {
-                        const headers = ['سرفصل (معین)', 'تفصیل', 'مبلغ (ریال)', 'روند'];
+                        const headers = ['سرفصل (معین)', 'تفصیل', 'مبلغ گزارش (ریال)', 'مبلغ مقایسه (ریال)', 'روند'];
                         const rows = comprehensiveData.map(i => [
                            i.account || 'نامشخص',
                            i.tafsil || 'نامشخص',
                            i.total,
-                           i.trendPercent ? i.trendPercent.toFixed(1) + '%' : '-'
+                           i.compVal || 0,
+                           i.trendPercent ? formatPct(i.trendPercent) : '-'
                         ]);
                         const csvContent = "data:text/csv;charset=utf-8,\uFEFF" 
                            + headers.join(',') + "\n"
@@ -668,66 +717,112 @@ export default function CostControlAnalysisView() {
             ) : (
                <div className="overflow-x-auto max-h-[600px]">
                   {comprehensiveViewType === 'matrix' ? (() => {
-                     const accounts: string[] = Array.from(new Set(comprehensiveData.map(d => String(d.account || 'نامشخص'))));
-                     const tafsils: string[] = Array.from(new Set(comprehensiveData.map(d => String(d.tafsil || 'نامشخص'))));
+                     const isAccountRow = matrixPivot === 'account-tafsil';
+                     
+                     const rowKeys: string[] = Array.from(new Set(comprehensiveData.map(d => String(isAccountRow ? d.account : d.tafsil || 'نامشخص'))));
+                     const colKeys: string[] = Array.from(new Set(comprehensiveData.map(d => String(isAccountRow ? d.tafsil : d.account || 'نامشخص'))));
                      const matrix: Record<string, Record<string, number>> = {};
                      
                      comprehensiveData.forEach(d => {
-                        const acc = d.account || 'نامشخص';
-                        const taf = d.tafsil || 'نامشخص';
-                        if (!matrix[acc]) matrix[acc] = {};
-                        matrix[acc][taf] = (matrix[acc][taf] || 0) + (d.total || 0);
+                        const row = isAccountRow ? (d.account || 'نامشخص') : (d.tafsil || 'نامشخص');
+                        const col = isAccountRow ? (d.tafsil || 'نامشخص') : (d.account || 'نامشخص');
+                        
+                        let val = 0;
+                        if (matrixValue === 'current') val = d.total || 0;
+                        else if (matrixValue === 'compare') val = d.compVal || 0;
+                        else if (matrixValue === 'trend') val = d.trendPercent || 0;
+                        else if (matrixValue === 'compare-percent') {
+                           const sumTotal = comprehensiveData.reduce((acc, curr) => acc + (curr.compVal || 0), 0);
+                           val = sumTotal > 0 ? ((d.compVal || 0) / sumTotal) * 100 : 0;
+                        }
+
+                        if (!matrix[row]) matrix[row] = {};
+                        matrix[row][col] = (matrix[row][col] || 0) + val;
                      });
+
+                     const getFormattedVal = (val: number) => {
+                        if (matrixValue === 'trend' || matrixValue === 'compare-percent') return val ? formatPct(val) : '-';
+                        return val > 0 ? Number(val).toLocaleString() : '-';
+                     };
 
                      return (
                         <table className="w-full text-sm text-right border-collapse">
                            <thead className="bg-slate-100 text-slate-600 font-medium sticky top-0 z-10 shadow-sm">
                               <tr>
-                                 <th className="px-6 py-4 border-b border-slate-200">سرفصل \ تفصیل</th>
-                                 {tafsils.map(t => (
-                                    <th key={t} className="px-6 py-4 border-b border-slate-200">{t}</th>
+                                 <th className="px-6 py-4 border-b border-slate-200 whitespace-nowrap">{isAccountRow ? 'سرفصل \\ تفصیل' : 'تفصیل \\ سرفصل'}</th>
+                                 {colKeys.map(c => (
+                                    <th key={c} className="px-6 py-4 border-b border-slate-200 whitespace-nowrap">{c}</th>
                                  ))}
-                                 <th className="px-6 py-4 border-b border-slate-200 bg-slate-200">جمع کل</th>
+                                 <th className="px-6 py-4 border-b border-slate-200 bg-slate-200 whitespace-nowrap">{matrixValue === 'trend' ? 'میانگین روند' : (matrixValue === 'compare-percent' ? 'جمع درصد' : 'جمع کل')}</th>
                               </tr>
                            </thead>
                            <tbody className="divide-y divide-slate-100">
-                              {accounts.map(acc => {
+                              {rowKeys.map(rowKey => {
                                  let rowTotal = 0;
+                                 let rowCount = 0;
+                                 colKeys.forEach(c => {
+                                    if (matrix[rowKey]?.[c] !== undefined && matrix[rowKey]?.[c] !== 0) {
+                                       rowTotal += matrix[rowKey][c];
+                                       rowCount++;
+                                    }
+                                 });
+                                 
+                                 const rowAgg = matrixValue === 'trend' ? (rowCount > 0 ? rowTotal / rowCount : 0) : rowTotal;
+
                                  return (
-                                    <tr key={acc} className="hover:bg-slate-50 transition-colors">
-                                       <td className="px-6 py-3 font-medium text-slate-800 bg-slate-50 border-l border-slate-100">{acc}</td>
-                                       {tafsils.map(t => {
-                                          const val = matrix[acc]?.[t] || 0;
-                                          rowTotal += val;
+                                    <tr key={rowKey} className="hover:bg-slate-50 transition-colors">
+                                       <td className="px-6 py-3 font-medium text-slate-800 bg-slate-50 border-l border-slate-100 whitespace-nowrap">{rowKey}</td>
+                                       {colKeys.map(c => {
+                                          const val = matrix[rowKey]?.[c] || 0;
                                           return (
-                                             <td key={t} className="px-6 py-3 font-mono text-slate-700 border-l border-slate-100">
-                                                {val > 0 ? Number(val).toLocaleString() : '-'}
+                                             <td key={c} className="px-6 py-3 font-mono text-slate-700 border-l border-slate-100 whitespace-nowrap" dir={(matrixValue === 'trend' || matrixValue === 'compare-percent') ? 'ltr' : 'rtl'}>
+                                                {getFormattedVal(val)}
                                              </td>
                                           );
                                        })}
-                                       <td className="px-6 py-3 font-mono font-bold text-slate-800 bg-slate-50">{Number(rowTotal).toLocaleString()}</td>
+                                       <td className="px-6 py-3 font-mono font-bold text-slate-800 bg-slate-50 whitespace-nowrap" dir={(matrixValue === 'trend' || matrixValue === 'compare-percent') ? 'ltr' : 'rtl'}>{getFormattedVal(rowAgg)}</td>
                                     </tr>
                                  );
                               })}
-                              {accounts.length > 0 && (
+                              {rowKeys.length > 0 && (
                                  <tr className="bg-slate-100 font-medium text-slate-800">
-                                    <td className="px-6 py-4 border-t border-slate-300 border-l border-slate-200">جمع کل ستون‌ها</td>
-                                    {tafsils.map(t => {
-                                       const colTotal = accounts.reduce((sum, acc) => sum + (matrix[acc]?.[t] || 0), 0);
+                                    <td className="px-6 py-4 border-t border-slate-300 border-l border-slate-200 whitespace-nowrap">جمع کل ستون‌ها</td>
+                                    {colKeys.map(c => {
+                                       let colTotal = 0;
+                                       let colCount = 0;
+                                       rowKeys.forEach(r => {
+                                          if (matrix[r]?.[c] !== undefined && matrix[r]?.[c] !== 0) {
+                                             colTotal += matrix[r][c];
+                                             colCount++;
+                                          }
+                                       });
+                                       const colAgg = matrixValue === 'trend' ? (colCount > 0 ? colTotal / colCount : 0) : colTotal;
+
                                        return (
-                                          <td key={t} className="px-6 py-4 font-mono border-t border-slate-300 border-l border-slate-200">
-                                             {colTotal > 0 ? Number(colTotal).toLocaleString() : '-'}
+                                          <td key={c} className="px-6 py-4 font-mono border-t border-slate-300 border-l border-slate-200 whitespace-nowrap" dir={(matrixValue === 'trend' || matrixValue === 'compare-percent') ? 'ltr' : 'rtl'}>
+                                             {getFormattedVal(colAgg)}
                                           </td>
                                        );
                                     })}
-                                    <td className="px-6 py-4 font-mono font-bold border-t border-slate-300 bg-slate-200">
-                                       {comprehensiveData.reduce((acc, curr) => acc + (curr.total || 0), 0).toLocaleString()}
+                                    <td className="px-6 py-4 font-mono font-bold border-t border-slate-300 bg-slate-200 whitespace-nowrap" dir={(matrixValue === 'trend' || matrixValue === 'compare-percent') ? 'ltr' : 'rtl'}>
+                                       {(() => {
+                                          let allTotal = 0;
+                                          let allCount = 0;
+                                          rowKeys.forEach(r => colKeys.forEach(c => {
+                                             if (matrix[r]?.[c] !== undefined && matrix[r]?.[c] !== 0) {
+                                                allTotal += matrix[r][c];
+                                                allCount++;
+                                             }
+                                          }));
+                                          const allAgg = matrixValue === 'trend' ? (allCount > 0 ? allTotal / allCount : 0) : allTotal;
+                                          return getFormattedVal(allAgg);
+                                       })()}
                                     </td>
                                  </tr>
                               )}
-                              {accounts.length === 0 && (
+                              {rowKeys.length === 0 && (
                                  <tr>
-                                    <td colSpan={tafsils.length + 2} className="text-center py-8 text-slate-500">داده‌ای یافت نشد.</td>
+                                    <td colSpan={colKeys.length + 2} className="text-center py-8 text-slate-500">داده‌ای یافت نشد.</td>
                                  </tr>
                               )}
                            </tbody>
@@ -739,32 +834,38 @@ export default function CostControlAnalysisView() {
                            <tr>
                               <th className="px-6 py-4 rounded-tr-lg">سرفصل (معین)</th>
                               <th className="px-6 py-4">تفصیل</th>
-                              <th className="px-6 py-4">مبلغ (ریال)</th>
+                              <th className="px-6 py-4">مبلغ {selectedPeriod ? getPeriodLabel(selectedPeriod, "گزارش") : "گزارش"} (ریال)</th>
+                              <th className="px-6 py-4">مبلغ {comparePeriod ? getPeriodLabel(comparePeriod, "مقایسه") : "مقایسه"} (ریال)</th>
                               <th className="px-6 py-4">سهم از کل گزارش</th>
-                              <th className="px-6 py-4 text-center rounded-tl-lg">روند ({comparePeriod || 'مقایسه'})</th>
+                              <th className="px-6 py-4">سهم از کل مقایسه</th>
+                              <th className="px-6 py-4 text-center rounded-tl-lg">روند (مقایسه)</th>
                            </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
                            {comprehensiveData.map((item, index) => {
                               const sumTotal = comprehensiveData.reduce((acc, curr) => acc + (curr.total || 0), 0);
                               const percent = sumTotal > 0 ? (item.total / sumTotal) * 100 : 0;
+                              const compSumTotal = comprehensiveData.reduce((acc, curr) => acc + (curr.compVal || 0), 0);
+                              const compPercent = compSumTotal > 0 ? ((item.compVal || 0) / compSumTotal) * 100 : 0;
                               return (
                                  <tr key={index} className="hover:bg-slate-50 transition-colors">
                                     <td className="px-6 py-3 font-medium text-slate-800">{item.account || 'نامشخص'}</td>
                                     <td className="px-6 py-3 text-slate-600">{item.tafsil || 'نامشخص'}</td>
                                     <td className="px-6 py-3 font-mono text-slate-700 font-medium">{Number(item.total).toLocaleString()}</td>
+                                    <td className="px-6 py-3 font-mono text-slate-500">{item.compVal ? Number(item.compVal).toLocaleString() : '-'}</td>
                                     <td className="px-6 py-3">
                                        <div className="flex items-center gap-2">
-                                          <span className="font-medium text-slate-700 w-10">{percent.toFixed(1)}%</span>
+                                          <span className="font-medium text-slate-700 w-10">{formatPct(percent)}</span>
                                           <div className="w-24 h-1.5 bg-slate-200 rounded-full overflow-hidden">
                                              <div className="h-full bg-blue-500 rounded-full" style={{ width: `${Math.min(percent, 100)}%` }}></div>
                                           </div>
                                        </div>
                                     </td>
+                                    <td className="px-6 py-3 font-mono text-slate-500 text-center">{item.compVal ? formatPct(compPercent) : '-'}</td>
                                     <td className="px-6 py-3 text-center">
                                        {item.trendPercent !== undefined && item.trendPercent !== 0 ? (
                                           <div className={`inline-flex items-center justify-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${item.trendPercent > 0 ? 'bg-rose-100 text-rose-700' : 'bg-emerald-100 text-emerald-700'}`}>
-                                             <span dir="ltr">{item.trendPercent > 0 ? '+' : ''}{item.trendPercent.toFixed(1)}%</span>
+                                             <span dir="ltr">{item.trendPercent > 0 ? '+' : ''}{formatPct(item.trendPercent)}</span>
                                           </div>
                                        ) : (
                                           <span className="text-slate-400">-</span>

@@ -6,3 +6,10 @@ coverage/
 *.log
 .env*
 !.env.example
+*.duckdb
+*.duckdb-wal
+*.duckdb-shm
+*.duckdb.wal
+*.duckdb.shm
+*.sqlite
+*.db
