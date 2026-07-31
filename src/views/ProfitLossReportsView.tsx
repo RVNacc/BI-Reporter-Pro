@@ -274,7 +274,7 @@ export default function ProfitLossReportsView() {
                            <th className="px-4 py-3 font-medium cursor-pointer hover:bg-slate-200" onClick={() => handleSort('qty')}>تعداد فروش {getSortIcon('qty')}</th>
                            <th className="px-4 py-3 font-medium cursor-pointer hover:bg-slate-200" onClick={() => handleSort('lastPurchasePrice')}>آخرین قیمت خرید {getSortIcon('lastPurchasePrice')}</th>
                            <th className="px-4 py-3 font-medium border-l border-slate-200 cursor-pointer hover:bg-slate-200" onClick={() => handleSort('costPrice')}>بهای تمام شده {getSortIcon('costPrice')}</th>
-                           <th className="px-4 py-3 font-medium border-l border-slate-200 cursor-pointer hover:bg-slate-200" onClick={() => handleSort('price')}>نرخ فروش {getSortIcon('price')}</th>
+                           <th className="px-4 py-3 font-medium border-l border-slate-200 cursor-pointer hover:bg-slate-200" onClick={() => handleSort('price')}>نرخ فروش (خالص) {getSortIcon('price')}</th>
                            <th className="px-4 py-3 font-medium cursor-pointer hover:bg-slate-200" onClick={() => handleSort('totalSales')}>جمع خالص (فروش) {getSortIcon('totalSales')}</th>
                            <th className="px-4 py-3 font-medium cursor-pointer hover:bg-slate-200" onClick={() => handleSort('profitLossPerUnit')}>فاصله سود/زیان {getSortIcon('profitLossPerUnit')}</th>
                            <th className="px-4 py-3 font-medium cursor-pointer hover:bg-slate-200" onClick={() => handleSort('totalProfitLoss')}>مبلغ سود/زیان {getSortIcon('totalProfitLoss')}</th>

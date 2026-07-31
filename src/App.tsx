@@ -16,6 +16,8 @@ import CostControlAnalysisView from './views/CostControlAnalysisView';
 import ParetoReportsView from './views/ParetoReportsView';
 import { WeeklyReportsView } from './views/WeeklyReportsView';
 import ProfitLossReportsView from './views/ProfitLossReportsView';
+import DiscountAnalysisView from './views/DiscountAnalysisView';
+import ComprehensiveProfitLossView from './views/ComprehensiveProfitLossView';
 import AdvancedManagementView from './views/AdvancedManagementView';
 import BudgetManagementView from './views/BudgetManagementView';
 import { Menu } from 'lucide-react';
@@ -30,6 +32,10 @@ export default function App() {
         return <DashboardView />;
       case 'files':
         return <FileManagerView />;
+      case 'discounts':
+        return <DiscountAnalysisView />;
+      case 'comprehensive-profit':
+        return <ComprehensiveProfitLossView />;
       case 'sales':
         return <SalesReportsView />;
       case 'inventory':

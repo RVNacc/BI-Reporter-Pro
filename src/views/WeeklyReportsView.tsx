@@ -1,5 +1,6 @@
 import AdvancedPeriodFilter from "../components/AdvancedPeriodFilter";
 import React, { useState, useEffect } from "react";
+import ExportPrintButtons from "../components/ExportPrintButtons";
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, ResponsiveContainer, Tooltip as RechartsTooltip, Legend } from "recharts";
 import { Download } from "lucide-react";
 import { defaultXAxisProps, defaultYAxisProps, verticalYAxisProps, hideAxisProps } from "../components/charts/ChartConfig";
@@ -42,32 +43,7 @@ export function WeeklyReportsView() {
     }
   }, [period, netMode]);
 
-  const handleExportCSV = () => {
-     if (!data || !data.rows || !data?.weeks) return;
-     let csv = "سطح ۱,سطح ۲,مرکز فعالیت";
-     const weeksContent = data?.weeks?.map((w: number) => `هفته ${w} - رشد,هفته ${w} - ${mode === "amt" ? "ریال" : "تعداد"}`).join(",");
-     csv += "," + weeksContent + "\n";
-
-     rows.forEach((row: any) => {
-         let line = `"${row.l1}","${row.l2}","${row.ac}"`;
-         data?.weeks.forEach((w: number) => {
-             const g = mode === "amt" ? row.wAmt[`g${w}`] : row.wQty[`g${w}`];
-             const val = mode === "amt" ? row.wAmt[`w${w}`] : row.wQty[`w${w}`];
-             const gVal = w > 1 ? (g * 100).toFixed(0) + '%' : '-';
-             line += `,"${gVal}","${val || 0}"`;
-         });
-         csv += line + "\n";
-     });
-
-     const encodeUri = encodeURI("data:text/csv;charset=utf-8," + csv);
-     const link = document.createElement("a");
-     link.setAttribute("href", encodeUri);
-     link.setAttribute("download", `گزارش_روند_هفتگی_${period || 'کل'}.csv`);
-     document.body.appendChild(link);
-     link.click();
-     document.body.removeChild(link);
-  };
-
+  
   if (!data) return <div className="p-6 text-slate-500">در حال بارگذاری...</div>;
   if (data.error) return <div className="p-6 text-rose-500">خطا: {data.error}</div>;
   if (!data.rows || !data?.weeks) return <div className="p-6 text-slate-500">داده‌ای یافت نشد.</div>;
@@ -105,13 +81,7 @@ export function WeeklyReportsView() {
              <button onClick={() => setMode("amt")} className={`px-4 py-1.5 text-sm rounded ${mode === "amt" ? "bg-white shadow text-blue-600 font-medium" : "text-slate-600 hover:text-slate-800"}`}>ریالی</button>
              <button onClick={() => setMode("qty")} className={`px-4 py-1.5 text-sm rounded ${mode === "qty" ? "bg-white shadow text-blue-600 font-medium" : "text-slate-600 hover:text-slate-800"}`}>تعدادی</button>
           </div>
-          <button 
-             onClick={handleExportCSV}
-             className="flex items-center gap-2 px-4 py-2 bg-emerald-50 text-emerald-600 hover:bg-emerald-100 rounded-lg text-sm font-medium border border-emerald-200 transition-colors"
-          >
-             <Download size={16} />
-             <span>خروجی اکسل</span>
-          </button>
+          <ExportPrintButtons data={rows} fileName="گزارش_هفتگی" />
         </div>
       </div>
 

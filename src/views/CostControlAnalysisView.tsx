@@ -4,6 +4,7 @@ import {
   PieChart, Pie, Cell, LineChart, Line, Legend 
 } from 'recharts';
 import { MultiSelect as PeriodSelect } from "../components/MultiSelect";
+import ExportPrintButtons from "../components/ExportPrintButtons";
 import { TrendingUp, TrendingDown, DollarSign, PieChart as PieChartIcon, Activity, ListFilter, AlertCircle } from 'lucide-react';
 
 interface CostAnalysisData {
@@ -257,7 +258,8 @@ const formatPct = (val: number | undefined) => {
         </div>
       </div>
 
-      <div className="mb-6 bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex flex-wrap gap-4 items-end">
+      <div className="mb-6 bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex flex-wrap gap-4 items-center justify-between">
+        <div className="flex flex-wrap gap-4 items-end">
          {activeTab === 'overview' && (
             <div className="flex flex-col gap-1">
                <span className="text-xs text-slate-500 mr-1">سطح تحلیل</span>
@@ -317,6 +319,8 @@ const formatPct = (val: number | undefined) => {
                placeholder="بدون مقایسه"
             />
          </div>
+      </div>
+      <ExportPrintButtons data={activeTab === 'comprehensive' ? (comprehensiveData || []) : (data?.costAnalysis || [])} fileName="تحلیل_هزینه" />
       </div>
 
       {activeTab === 'overview' && data && (

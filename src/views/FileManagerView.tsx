@@ -282,8 +282,8 @@ export default function FileManagerView() {
                     >
                       <option value="">-- انتخاب ستون فایل --</option>
                       <option value="_STATIC_">-- مقدار ثابت (Static) --</option>
-                      {stagedFile.headers.map((h) => (
-                        <option key={h} value={h}>
+                      {stagedFile.headers.map((h, i) => (
+                        <option key={i + "_" + h} value={h}>
                           {h}
                         </option>
                       ))}
@@ -329,13 +329,17 @@ export default function FileManagerView() {
                <button onClick={() => fileInputRef.current?.click()} className="flex items-center gap-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors border border-rose-200">
                  بازیابی پایگاه داده
                </button>
-               <a 
-                 href="/api/database/export" 
-                 download
-                 className="flex items-center gap-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors border border-indigo-200"
-               >
-                 دانلود نسخه پشتیبان
-               </a>
+               
+               <a
+                href="/api/database/export"
+                download="hypermarket_backup.db"
+                target="_blank"
+                title="دریافت پشتیبان پایگاه داده"
+                className="flex items-center gap-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors border border-indigo-200 cursor-pointer"
+              >
+                دانلود نسخه پشتیبان
+              </a>
+
                <span className="text-xs font-medium bg-blue-100 text-blue-700 px-3 py-1 rounded-full">
                  {files.length} منبع داده
                </span>

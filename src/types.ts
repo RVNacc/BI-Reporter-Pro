@@ -49,7 +49,10 @@ export const MODULES: Record<string, ModuleConfig> = {
       { key: "totalPrice", label: "مبلغ کل فروش", required: false },
       { key: "vatAmount", label: "ارزش افزوده ردیف", required: false },
       { key: "lastPurchasePrice", label: "آخرین نرخ خرید", required: false },
-      { key: "costPrice", label: "بهای تمام شده", required: false }
+      { key: "costPrice", label: "بهای تمام شده", required: false },
+      { key: "discount", label: "مبلغ تخفیف (کلی)", required: false },
+      { key: "discountLevel1", label: "تخفیف سطح ۱", required: false },
+      { key: "discountLevel2", label: "تخفیف سطح ۲", required: false }
     ]
   },
   purchases: {
@@ -64,6 +67,7 @@ export const MODULES: Record<string, ModuleConfig> = {
       { key: "productName", label: "نام کالا", required: false },
       { key: "quantity", label: "مقدار/تعداد", required: true },
       { key: "price", label: "نرخ خرید", required: true },
+      { key: "freightCost", label: "کرایه حمل خرید", required: false },
       { key: "vatAmount", label: "مبلغ ارزش افزوده", required: false }
     ]
   },

@@ -1,0 +1,16 @@
+            const amount = Number(row.amount);
+            const tType = row.transactionType ? String(row.transactionType).trim() : "";
+            if (tType && (tType.includes("ورود") || tType.includes("دریافت") || tType.includes("درآمد") || tType.includes("واریز"))) {
+                continue;
+            }
+
+            if (!isNaN(amount)) {
+                periodCostsByCenter[center] = (periodCostsByCenter[center] || 0) + amount;
+            }
+        }
+    
+    for (const c of costCenters) {
+        if (allSyncedCenters.has(c.name)) {
+            c.total_cost = periodCostsByCenter[c.name] || 0;
+        }
+        c.available_accounts = globalAccounts;

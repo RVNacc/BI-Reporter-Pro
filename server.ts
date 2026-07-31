@@ -1,14 +1,48 @@
+(BigInt.prototype as any).toJSON = function() { return this.toString(); };
 import express from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
 import multer from "multer";
 import compression from "compression";
 import { Database as DuckDB } from "duckdb-async";
-import * as xlsx from "xlsx";
+import xlsx from "xlsx";
+import ExcelJS from "exceljs";
 import fs from "fs";
+import os from "os";
 import cors from "cors";
 import jalaali from "jalaali-js";
 import { Database } from "duckdb-async";
+
+function extractExcelValue(val: any, sharedStrings?: any[]): string {
+    if (val === null || val === undefined) return '';
+    if (val instanceof Date) return val.toISOString();
+    if (typeof val === 'object') {
+        if (val.sharedString !== undefined && sharedStrings) {
+             const str = sharedStrings[val.sharedString];
+             if (typeof str === 'string') return str;
+             if (str && str.richText) return str.richText.map((rt: any) => rt.text).join('');
+             if (str && str.text) return str.text;
+             if (str === null || str === undefined) return '';
+             return String(str);
+        }
+        if (val.result !== undefined) return String(val.result);
+        if (val.text !== undefined) return String(val.text);
+        if (val.richText !== undefined) return val.richText.map((rt: any) => rt.text).join('');
+        if (val.hyperlink !== undefined) return String(val.text || val.hyperlink);
+        if (val.error !== undefined) return String(val.error);
+        if (val.value !== undefined) return String(val.value);
+        try {
+            const str = JSON.stringify(val);
+            if (str === '{}' || String(val) === '[object Object]') return '';
+            return str;
+        } catch(e) {
+            if (String(val) === '[object Object]') return '';
+            return String(val);
+        }
+    }
+    if (String(val) === '[object Object]') return '';
+    return String(val);
+}
 
 const app = express();
 const PORT = 3000;
@@ -168,6 +202,22 @@ function isDateInPeriod(
 
 async function initDbSchema(database: any) {
   await database.exec(`
+    
+
+    CREATE MACRO IF NOT EXISTS match_period(dateStr, periodStr) AS
+      periodStr = '' OR
+      (periodStr LIKE 'Y:%' AND substr(dateStr, 1, 4) = substr(periodStr, 3, 4)) OR
+      (periodStr LIKE 'M:%' AND substr(dateStr, 1, 7) = substr(periodStr, 3, 7)) OR
+      (periodStr LIKE 'Q:%' AND substr(dateStr, 1, 4) = substr(periodStr, 3, 4) AND CAST(substr(dateStr, 6, 2) AS INTEGER) >= (CAST(substr(periodStr, 9, 1) AS INTEGER) - 1) * 3 + 1 AND CAST(substr(dateStr, 6, 2) AS INTEGER) <= CAST(substr(periodStr, 9, 1) AS INTEGER) * 3) OR
+      (periodStr LIKE 'W:%' AND substr(dateStr, 1, 4) = substr(periodStr, 3, 4) AND CAST(floor(((CASE WHEN CAST(substr(dateStr, 6, 2) AS INTEGER) <= 6 THEN (CAST(substr(dateStr, 6, 2) AS INTEGER) - 1) * 31 + CAST(substr(dateStr, 9, 2) AS INTEGER) ELSE 186 + (CAST(substr(dateStr, 6, 2) AS INTEGER) - 7) * 30 + CAST(substr(dateStr, 9, 2) AS INTEGER) END) - 1) / 7) + 1 AS INTEGER) = CAST(substr(periodStr, 9, 2) AS INTEGER)) OR
+      (periodStr LIKE 'ADV:%' AND 
+         (split_part(substr(periodStr, 5), '|', 1) = '' OR list_contains(string_split(split_part(substr(periodStr, 5), '|', 1), ','), substr(dateStr, 1, 4))) AND
+         (split_part(substr(periodStr, 5), '|', 2) = '' OR list_contains(string_split(split_part(substr(periodStr, 5), '|', 2), ','), CAST(CAST(substr(dateStr, 6, 2) AS INTEGER) AS VARCHAR))) AND
+         (split_part(substr(periodStr, 5), '|', 3) = '' OR list_contains(string_split(split_part(substr(periodStr, 5), '|', 3), ','), CAST(CAST(floor(((CASE WHEN CAST(substr(dateStr, 6, 2) AS INTEGER) <= 6 THEN (CAST(substr(dateStr, 6, 2) AS INTEGER) - 1) * 31 + CAST(substr(dateStr, 9, 2) AS INTEGER) ELSE 186 + (CAST(substr(dateStr, 6, 2) AS INTEGER) - 7) * 30 + CAST(substr(dateStr, 9, 2) AS INTEGER) END) - 1) / 7) + 1 AS INTEGER) AS VARCHAR)))
+      ) OR
+      (periodStr NOT LIKE '%:%' AND dateStr LIKE periodStr || '%');
+`);
+  await database.exec(`
     CREATE SEQUENCE IF NOT EXISTS seq_files_id;
       CREATE TABLE IF NOT EXISTS files (
       id INTEGER DEFAULT nextval('seq_files_id') PRIMARY KEY,
@@ -210,6 +260,21 @@ async function initDbSchema(database: any) {
       description TEXT
     );
   `);
+  try {
+    await database.exec(`
+      -- Normalize any badly formatted dates in existing raw_data
+      UPDATE raw_data 
+      SET data = regexp_replace(
+        data,
+        '"date"\\s*:\\s*"' || replace(json_extract_string(data, '$.date'), '/', '\\/') || '"',
+        '"date":"' || 
+        substr(json_extract_string(data, '$.date'), 1, 4) || '/' ||
+        lpad(split_part(replace(json_extract_string(data, '$.date'), '-', '/'), '/', 2), 2, '0') || '/' ||
+        lpad(split_part(replace(json_extract_string(data, '$.date'), '-', '/'), '/', 3), 2, '0') || '"'
+      )
+      WHERE json_extract_string(data, '$.date') IS NOT NULL AND length(json_extract_string(data, '$.date')) < 10;
+    `);
+  } catch (e) { console.error("Could not normalize dates:", e); }
 
   try {
     await database.exec("ALTER TABLE cost_centers ADD COLUMN allocation_level TEXT DEFAULT 'level_1'");
@@ -232,6 +297,143 @@ try {
 } catch(e) {}
 
 // --- API ROUTES ---
+
+app.get("/api/discounts-analysis", async (req, res) => {
+  try {
+    const period = req.query.period || '';
+    const query = `
+      SELECT 
+        coalesce(json_extract_string(r.data, '$.productName'), json_extract_string(r.data, '$.productCode'), 'نامشخص') as productName,
+        json_extract_string(r.data, '$.productCode') as productCode,
+        SUM(TRY_CAST(REPLACE(json_extract_string(r.data, '$.quantity'), ',', '') AS REAL)) as qty,
+        SUM(coalesce(TRY_CAST(json_extract_string(r.data, '$.discount') AS REAL), 0)) as discountOverall,
+        SUM(coalesce(TRY_CAST(json_extract_string(r.data, '$.discountLevel1') AS REAL), 0)) as discountLevel1,
+        SUM(coalesce(TRY_CAST(json_extract_string(r.data, '$.discountLevel2') AS REAL), 0)) as discountLevel2,
+        SUM(coalesce(TRY_CAST(json_extract_string(r.data, '$.totalPrice') AS REAL), TRY_CAST(REPLACE(json_extract_string(r.data, '$.quantity'), ',', '') AS REAL) * TRY_CAST(json_extract_string(r.data, '$.price') AS REAL))) as grossSales
+      FROM raw_data r 
+      JOIN files f ON r.file_id = f.id 
+      WHERE f.module_type = 'sales' 
+      AND (match_period(json_extract_string(r.data, '$.date'), ?) OR ? = 'ignore')
+      GROUP BY productCode, productName
+    `;
+    const data = await db.all(query, period, period);
+    
+    // Aggregate by category by joining with products module
+    const catQuery = `
+      SELECT 
+        coalesce(json_extract_string(p.data, '$.mainGroup'), 'بدون گروه') as category,
+        SUM(coalesce(TRY_CAST(json_extract_string(r.data, '$.discount') AS REAL), 0) + coalesce(TRY_CAST(json_extract_string(r.data, '$.discountLevel1') AS REAL), 0) + coalesce(TRY_CAST(json_extract_string(r.data, '$.discountLevel2') AS REAL), 0)) as totalDiscount,
+        SUM(coalesce(TRY_CAST(json_extract_string(r.data, '$.totalPrice') AS REAL), TRY_CAST(REPLACE(json_extract_string(r.data, '$.quantity'), ',', '') AS REAL) * TRY_CAST(json_extract_string(r.data, '$.price') AS REAL))) as grossSales
+      FROM raw_data r 
+      JOIN files f ON r.file_id = f.id 
+      LEFT JOIN raw_data p ON json_extract_string(r.data, '$.productCode') = json_extract_string(p.data, '$.productCode') AND p.file_id IN (SELECT id FROM files WHERE module_type = 'products')
+      WHERE f.module_type = 'sales' 
+      AND (match_period(json_extract_string(r.data, '$.date'), ?) OR ? = 'ignore')
+      GROUP BY category
+    `;
+    const catData = await db.all(catQuery, period, period);
+    
+    // Freight Analysis
+    const freightQuery = `
+      SELECT 
+        coalesce(json_extract_string(r.data, '$.productName'), json_extract_string(r.data, '$.productCode'), 'نامشخص') as productName,
+        json_extract_string(r.data, '$.productCode') as productCode,
+        SUM(TRY_CAST(REPLACE(json_extract_string(r.data, '$.quantity'), ',', '') AS REAL)) as qty,
+        SUM(coalesce(TRY_CAST(json_extract_string(r.data, '$.freightCost') AS REAL), 0)) as freightCost,
+        SUM(coalesce(TRY_CAST(json_extract_string(r.data, '$.totalPrice') AS REAL), TRY_CAST(REPLACE(json_extract_string(r.data, '$.quantity'), ',', '') AS REAL) * TRY_CAST(json_extract_string(r.data, '$.price') AS REAL))) as grossPurchases
+      FROM raw_data r 
+      JOIN files f ON r.file_id = f.id 
+      WHERE f.module_type = 'purchases' 
+      AND (match_period(json_extract_string(r.data, '$.date'), ?) OR ? = 'ignore')
+      GROUP BY productCode, productName
+    `;
+    const freightProducts = await db.all(freightQuery, period, period);
+    
+    const freightCatQuery = `
+      SELECT 
+        coalesce(json_extract_string(p.data, '$.mainGroup'), 'بدون گروه') as category,
+        SUM(coalesce(TRY_CAST(json_extract_string(r.data, '$.freightCost') AS REAL), 0)) as totalFreight,
+        SUM(coalesce(TRY_CAST(json_extract_string(r.data, '$.totalPrice') AS REAL), TRY_CAST(REPLACE(json_extract_string(r.data, '$.quantity'), ',', '') AS REAL) * TRY_CAST(json_extract_string(r.data, '$.price') AS REAL))) as grossPurchases
+      FROM raw_data r 
+      JOIN files f ON r.file_id = f.id 
+      LEFT JOIN raw_data p ON json_extract_string(r.data, '$.productCode') = json_extract_string(p.data, '$.productCode') AND p.file_id IN (SELECT id FROM files WHERE module_type = 'products')
+      WHERE f.module_type = 'purchases' 
+      AND (match_period(json_extract_string(r.data, '$.date'), ?) OR ? = 'ignore')
+      GROUP BY category
+    `;
+    const freightCategories = await db.all(freightCatQuery, period, period);
+
+    res.json({ products: data, categories: catData, freightProducts, freightCategories });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/api/comprehensive-profit", async (req, res) => {
+  try {
+    const period = req.query.period || '';
+    const method = req.query.method || 'AVG'; // 'AVG' or 'FIFO'
+    
+    // In a real scenario, FIFO requires tracking batches. We'll approximate or stick to Average Cost (AVG) for standard.
+    // Cost calculation: 
+    // Opening balance (if exists) + Purchases (price * qty + freightCost) / Total Qty
+    
+    const query = `
+      WITH opening AS (
+        SELECT 
+          json_extract_string(data, '$.productCode') as code,
+          SUM(TRY_CAST(REPLACE(json_extract_string(data, '$.quantity'), ',', '') AS REAL)) as qty,
+          SUM(TRY_CAST(REPLACE(json_extract_string(data, '$.quantity'), ',', '') AS REAL) * TRY_CAST(json_extract_string(data, '$.price') AS REAL)) as totalValue
+        FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type = 'opening_inventory'
+        GROUP BY code
+      ),
+      purchases AS (
+        SELECT 
+          json_extract_string(data, '$.productCode') as code,
+          SUM(TRY_CAST(REPLACE(json_extract_string(data, '$.quantity'), ',', '') AS REAL)) as qty,
+          SUM(TRY_CAST(REPLACE(json_extract_string(data, '$.quantity'), ',', '') AS REAL) * TRY_CAST(json_extract_string(data, '$.price') AS REAL) + coalesce(TRY_CAST(json_extract_string(data, '$.freightCost') AS REAL), 0)) as totalValue
+        FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type = 'purchases' AND (json_extract_string(data, '$.date') <= ? OR ? = '')
+        GROUP BY code
+      ),
+      sales AS (
+        SELECT 
+          coalesce(json_extract_string(data, '$.productName'), json_extract_string(data, '$.productCode'), 'نامشخص') as name,
+          json_extract_string(data, '$.productCode') as code,
+          SUM(TRY_CAST(REPLACE(json_extract_string(data, '$.quantity'), ',', '') AS REAL)) as qty,
+          SUM(
+            (coalesce(TRY_CAST(json_extract_string(data, '$.totalPrice') AS REAL), TRY_CAST(REPLACE(json_extract_string(data, '$.quantity'), ',', '') AS REAL) * TRY_CAST(json_extract_string(data, '$.price') AS REAL)) - coalesce(TRY_CAST(json_extract_string(data, '$.discount') AS REAL), 0) - coalesce(TRY_CAST(json_extract_string(data, '$.discountLevel1') AS REAL), 0) - coalesce(TRY_CAST(json_extract_string(data, '$.discountLevel2') AS REAL), 0))
+          ) as netSales
+        FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type = 'sales' AND (match_period(json_extract_string(data, '$.date'), ?) OR ? = 'ignore')
+        GROUP BY code, name
+      )
+      
+      SELECT 
+        s.name,
+        s.code,
+        s.qty as salesQty,
+        s.netSales,
+        o.qty as openQty,
+        o.totalValue as openVal,
+        p.qty as purchQty,
+        p.totalValue as purchVal,
+        coalesce(p.totalValue, 0) as totalPurchVal,
+        CASE 
+          WHEN (coalesce(o.qty, 0) + coalesce(p.qty, 0)) > 0 
+          THEN (coalesce(o.totalValue, 0) + coalesce(p.totalValue, 0)) / (coalesce(o.qty, 0) + coalesce(p.qty, 0))
+          ELSE 0 
+        END as unitCost
+      FROM sales s
+      LEFT JOIN opening o ON s.code = o.code
+      LEFT JOIN purchases p ON s.code = p.code
+    `;
+    const data = await db.all(query, period, period, period, period);
+    
+    res.json(data);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 
 app.use(cors());
 app.use(express.json());
@@ -271,19 +473,37 @@ app.use("/api/dashboard", cacheMiddleware);
 app.use("/api/periods", cacheMiddleware);
 app.use("/api/export-excel", cacheMiddleware);
 
+let isRestoring = false;
 
 // Export Database
 app.get("/api/database/export", async (req, res) => {
+  if (isRestoring) return res.status(429).json({ error: "سیستم در حال عملیات روی دیتابیس است." });
+  isRestoring = true;
+  const tempPath = path.join(os.tmpdir(), `hypermarket_export_${Date.now()}.duckdb`);
   try {
-    await db.exec("CHECKPOINT;");
+    await db.exec("FORCE CHECKPOINT;");
   } catch (e) {
     console.error("Checkpoint failed before export:", e);
   }
-  res.download(dbPath, `hypermarket_backup_${new Date().getTime()}.duckdb`);
+  try {
+    console.log("Closing db to allow safe copying on Windows...");
+    await db.close();
+    fs.copyFileSync(dbPath, tempPath);
+    // Reopen immediately
+    db = await Database.create(dbPath);
+    isRestoring = false;
+    res.download(tempPath, `hypermarket_backup_${new Date().getTime()}.db`, (err) => {
+      try { if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath); } catch (e) {}
+    });
+  } catch(e) {
+    console.error("Failed to copy database for export:", e);
+    try { db = await Database.create(dbPath); } catch(err) {}
+    isRestoring = false;
+    try { if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath); } catch (err) {}
+    res.status(500).json({ error: "خطا در تهیه نسخه پشتیبان" });
+  }
 });
-
 // Import Database
-let isRestoring = false;
 app.post("/api/database/import", (req, res, next) => { clearCache(); next(); }, upload.single("file"), async (req, res) => {
   if (isRestoring) {
     return res.status(429).json({ error: "سیستم در حال بازیابی است، لطفا صبر کنید." });
@@ -357,105 +577,241 @@ app.post("/api/database/import", (req, res, next) => { clearCache(); next(); }, 
 });
 
 // 1. Upload Preview API (Step 1)
-app.post("/api/upload-preview", upload.single("file"), async (req, res) => {
+app.post("/api/upload-preview", upload.single("file"), (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: "فایلی آپلود نشد." });
     }
 
-    const fileBuffer = fs.readFileSync(req.file.path);
-    const workbook = xlsx.read(fileBuffer, { type: "buffer", sheetRows: 1 });
-    const sheetName = workbook.SheetNames[0];
-    const sheet = workbook.Sheets[sheetName];
-    // Read only first row for headers
-    const data = xlsx.utils.sheet_to_json(sheet, { header: 1 });
-    const headers = data[0] || [];
+    let originalName = req.file.originalname;
+    try {
+        originalName = Buffer.from(originalName, 'latin1').toString('utf8');
+    } catch(e) {}
+    
+    let headers = [];
+    
+    (async () => {
+        try {
+            const options = { sharedStrings: 'cache', hyperlinks: 'ignore', worksheets: 'emit' } as any;
+            const workbookReader = new ExcelJS.stream.xlsx.WorkbookReader(req.file.path, options);
+            const jsonData = [];
+            
+            let sheetIdx = 0;
+            
+            for await (const worksheetReader of workbookReader) {
+                if (sheetIdx === 0) {
+                    for await (const row of worksheetReader) {
+                        if (jsonData.length < 50) {
+                            jsonData.push(Array.isArray(row.values) ? row.values.slice(1) : []);
+                        }
+                    }
+                } else {
+                    for await (const row of worksheetReader) {} // consume
+                }
+                sheetIdx++;
+            }
 
-    res.json({
-      tempFilename: req.file.filename,
-      originalName: req.file.originalname,
-      headers,
-    });
-  } catch (err: any) {
-    console.error("Preview Error:", err);
-    res.status(500).json({ error: "خطا در پردازش فایل: " + err.message });
+
+
+            let maxStringCells = -1;
+            let headerRowIndex = -1;
+            for (let i = 0; i < jsonData.length; i++) {
+                const row = jsonData[i];
+                if (Array.isArray(row)) {
+                    const stringCells = row.filter(c => c !== null && c !== undefined && String(c).trim() !== '' && typeof c === 'string' && isNaN(Number(c))).length;
+                    if (stringCells > maxStringCells) {
+                        maxStringCells = stringCells;
+                        headerRowIndex = i;
+                    }
+                }
+            }
+            
+            if (headerRowIndex !== -1) {
+                const row = jsonData[headerRowIndex] as any[];
+                headers = row.map(c => extractExcelValue(c, (workbookReader as any).sharedStrings).trim());
+            }
+            res.json({ headers, id: Date.now(), tempFilename: req.file.filename, originalName });
+        } catch (e: any) {
+            console.error("Preview Read Error:", e);
+            try { fs.unlinkSync(req.file!.path); } catch(e) {}
+            return res.status(400).json({ error: "فرمت فایل پشتیبانی نمی‌شود یا فایل خراب است.", details: e.message, stack: e.stack });
+        }
+    })();
+  } catch (err) {
+    console.error("Upload Preview Error:", err);
+    try { if (req.file) fs.unlinkSync(req.file.path); } catch(e) {}
+    res.status(500).json({ error: "خطا در پردازش فایل." });
   }
 });
 
-// 1.5. Upload Commit API (Step 2)
+// 2. Upload Commit API (Step 2)
 app.post("/api/upload-commit", (req, res, next) => { clearCache(); next(); }, async (req, res) => {
   try {
     const { tempFilename, originalName, module_type, mappings, staticMappings = {} } = req.body;
     const filePath = path.join(UPLOADS_DIR, tempFilename);
-
     if (!fs.existsSync(filePath)) {
       return res.status(404).json({ error: "فایل موقت یافت نشد." });
     }
 
-    const fileBuffer = fs.readFileSync(filePath);
-    const workbook = xlsx.read(fileBuffer, { type: "buffer", cellDates: true, dense: true });
-    const sheetName = workbook.SheetNames[0];
-    const sheet = workbook.Sheets[sheetName];
-    const data = xlsx.utils.sheet_to_json(sheet, { raw: false, dateNF: 'yyyy-mm-dd' });
-    const rowCount = data.length;
+    if (!module_type || !mappings) {
+      return res.status(400).json({ error: "اطلاعات ناقص است." });
+    }
 
+    // Prepare DB entry
     await db.run(
       "INSERT INTO files (filename, original_name, module_type, row_count) VALUES (?, ?, ?, ?)",
       tempFilename,
-      originalName,
+      originalName || 'unknown',
       module_type,
-      rowCount
+      0 // We will update this later
     );
     const fileIdRes = await db.all("SELECT max(id) as id FROM files");
     const fileId = fileIdRes[0].id;
-
-    // Use mappings to generate normalized raw_data
-    const insertData = "INSERT INTO raw_data (file_id, data) VALUES (?, ?)";
+    let totalRows = 0;
     
-    // Chunk processing
-    const CHUNK_SIZE = 10000;
-    const processChunk = async (chunk: any[]) => {
-      await db.exec("BEGIN TRANSACTION"); 
-      try {
-        const stmt = await db.prepare("INSERT INTO raw_data (file_id, data) VALUES (?, ?)");
+    try {
+        const options = { sharedStrings: 'cache', hyperlinks: 'ignore', worksheets: 'emit' } as any;
+        const workbookReader = new ExcelJS.stream.xlsx.WorkbookReader(filePath, options);
+        let headerRowIndex = -1;
+        let headers: any[] = [];
+        let maxStringCells = -1;
+        const potentialHeaderRows: any[] = [];
+        let foundHeader = false;
         
-        for (const row of chunk) {
-          const normalizedRow: any = {};
-          for (const [sysKey, exKey] of Object.entries(mappings)) {
-            if (exKey === '_STATIC_') {
-                normalizedRow[sysKey] = staticMappings[sysKey] || 'نامشخص';
-            } else if (exKey && row[exKey as string] !== undefined && row[exKey as string] !== null) {
-              let val = String(row[exKey as string]).trim();
-              val = val.replace(/[۰-۹]/g, d => '0123456789'['۰۱۲۳۴۵۶۷۸۹'.indexOf(d)]);
-              val = val.replace(/[٠-٩]/g, d => '0123456789'['٠١٢٣٤٥٦٧٨٩'.indexOf(d)]);
-              
-              if (['quantity', 'price', 'totalPrice', 'costPrice', 'lastPurchasePrice', 'amount', 'vatAmount', 'discount', 'openingBalance', 'volume'].includes(sysKey)) {
-                  val = val.replace(/,/g, '');
-              }
-              if (sysKey === 'date') {
-                 const dMatch = val.match(/^(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})/);
-                 if (dMatch) {
-                     val = `${dMatch[1]}/${dMatch[2].padStart(2, '0')}/${dMatch[3].padStart(2, '0')}`;
-                 }
-              }
-              normalizedRow[sysKey] = val;
+        let batchBuffer: Record<string, any>[] = [];
+        
+        const flushBatch = async () => {
+            if (batchBuffer.length === 0) return;
+            const placeholders: string[] = [];
+            const values: any[] = [];
+            for (const normalizedRow of batchBuffer) {
+                placeholders.push('(?, ?)');
+                values.push(fileId, JSON.stringify(normalizedRow));
             }
-          }
-          await stmt.run(fileId, JSON.stringify(normalizedRow));
+            await db.run(`INSERT INTO raw_data (file_id, data) VALUES ${placeholders.join(',')}`, ...values);
+            batchBuffer = [];
+        };
+
+        const processRowObj = async (rowObj: any) => {
+            const normalizedRow: Record<string, any> = {};
+            for (const [sysKey, exKey] of Object.entries(mappings)) {
+              if (exKey === '_STATIC_') {
+                  normalizedRow[sysKey] = staticMappings[sysKey] || 'نامشخص';
+              } else if (exKey && rowObj[exKey as string] !== undefined && rowObj[exKey as string] !== null && rowObj[exKey as string] !== '') {
+                let val = String(rowObj[exKey as string]).trim();
+                val = val.replace(/[۰-۹]/g, (d: string) => '0123456789'.charAt('۰۱۲۳۴۵۶۷۸۹'.indexOf(d)));
+                val = val.replace(/[٠-٩]/g, (d: string) => '0123456789'.charAt('٠١٢٣٤٥٦٧٨٩'.indexOf(d)));
+                if (['quantity', 'price', 'totalPrice', 'costPrice', 'lastPurchasePrice', 'amount', 'vatAmount', 'discount', 'discountLevel1', 'discountLevel2', 'freightCost', 'openingBalance', 'volume'].includes(sysKey)) {
+                    val = val.replace(/,/g, '').trim();
+                    if (val === '-' || val === '') val = '0';
+                }
+                if (sysKey === 'date') {
+                   const dMatch = val.match(/^(d{4})[/-](d{1,2})[/-](d{1,2})/);
+                   if (dMatch) {
+                       val = `${dMatch[1]}/${dMatch[2].padStart(2, '0')}/${dMatch[3].padStart(2, '0')}`;
+                   }
+                }
+                normalizedRow[sysKey] = val;
+              }
+            }
+            batchBuffer.push(normalizedRow);
+            totalRows++;
+            if (batchBuffer.length >= 500) {
+                await flushBatch();
+            }
+        };
+
+        let sheetIdx = 0;
+        for await (const worksheetReader of workbookReader) {
+            if (sheetIdx === 0) {
+                for await (const row of worksheetReader) {
+                    const rowValues = Array.isArray(row.values) ? row.values.slice(1) : [];
+                    
+                    if (!foundHeader) {
+                        potentialHeaderRows.push(rowValues);
+                        
+                        const stringCells = rowValues.filter(c => c !== null && c !== undefined && String(c).trim() !== '' && typeof c === 'string' && isNaN(Number(c))).length;
+                        if (stringCells > maxStringCells) {
+                            maxStringCells = stringCells;
+                            headerRowIndex = potentialHeaderRows.length - 1;
+                        }
+                        
+                        if (potentialHeaderRows.length >= 50) {
+                            foundHeader = true;
+                            if (headerRowIndex !== -1) {
+                                headers = potentialHeaderRows[headerRowIndex].map(c => extractExcelValue(c, (workbookReader as any).sharedStrings).trim());
+                            } else {
+                                throw new Error("فایل ساختار مناسبی ندارد یا هدر یافت نشد.");
+                            }
+                            
+                            // Process rows after header from buffer
+                            for (let i = headerRowIndex + 1; i < potentialHeaderRows.length; i++) {
+                                const bufRow = potentialHeaderRows[i];
+                                if (!bufRow.some(c => c !== null && c !== undefined && String(c).trim() !== '')) continue;
+                                const rowObj: any = {};
+                                for (let j = 0; j < headers.length; j++) {
+                                    if (headers[j]) {
+                                        let val = bufRow[j];
+                                        val = extractExcelValue(val, (workbookReader as any).sharedStrings);
+                                        rowObj[headers[j]] = val;
+                                    }
+                                }
+                                await processRowObj(rowObj);
+                            }
+                        }
+                    } else {
+                        if (!rowValues.some(c => c !== null && c !== undefined && String(c).trim() !== '')) continue;
+                        const rowObj: any = {};
+                        for (let j = 0; j < headers.length; j++) {
+                            if (headers[j]) {
+                                let val = rowValues[j];
+                                val = extractExcelValue(val, (workbookReader as any).sharedStrings);
+                                rowObj[headers[j]] = val;
+                            }
+                        }
+                        await processRowObj(rowObj);
+                    }
+                }
+            } else {
+                for await (const row of worksheetReader) {} // consume
+            }
+            sheetIdx++;
         }
-        await stmt.finalize();
-        await db.exec("COMMIT");
-      } catch(e) { 
-        await db.exec("ROLLBACK"); 
-        throw e; 
-      }
-    };
+        
+        // Handle files with less than 50 rows where header wasn't found in first 50
+        if (!foundHeader) {
+            if (headerRowIndex !== -1) {
+                headers = potentialHeaderRows[headerRowIndex].map(c => extractExcelValue(c, (workbookReader as any).sharedStrings).trim());
+                for (let i = headerRowIndex + 1; i < potentialHeaderRows.length; i++) {
+                    const bufRow = potentialHeaderRows[i];
+                    if (!bufRow.some(c => c !== null && c !== undefined && String(c).trim() !== '')) continue;
+                    const rowObj: any = {};
+                    for (let j = 0; j < headers.length; j++) {
+                        if (headers[j]) {
+                            let val = bufRow[j];
+                            val = extractExcelValue(val, (workbookReader as any).sharedStrings);
+                            rowObj[headers[j]] = val;
+                        }
+                    }
+                    await processRowObj(rowObj);
+                }
+            } else {
+                throw new Error("فایل خالی است یا ساختار مناسبی ندارد.");
+            }
+        }
+        
+        await flushBatch();
 
-    for (let i = 0; i < data.length; i += CHUNK_SIZE) {
-      await processChunk(data.slice(i, i + CHUNK_SIZE));
+    } catch (e) {
+        console.error("Parse error:", e);
+        await db.run("DELETE FROM files WHERE id = ?", fileId);
+        throw e;
     }
+    
+    // Update row count
+    await db.run("UPDATE files SET row_count = ? WHERE id = ?", totalRows, fileId);
 
-    res.json({ message: "فایل با موفقیت نگاشت و ذخیره شد.", fileId, rowCount });
+    res.json({ message: "فایل با موفقیت نگاشت و ذخیره شد.", fileId, rowCount: totalRows });
   } catch (err: any) {
     console.error("Commit Error:", err);
     res.status(500).json({ error: "خطا در نگاشت فایل: " + err.message });
@@ -514,7 +870,8 @@ app.get("/api/periods", async (req, res) => {
 
     Array.from(yearMonths).sort().reverse().forEach(ym => {
        const parts = (ym as string).split('/');
-       options.push({ value: `M:${ym}`, label: `ماه ${parts[1]} سال ${parts[0]}` });
+       const monthNames = ['فروردین', 'اردیبهشت', 'خرداد', 'تیر', 'مرداد', 'شهریور', 'مهر', 'آبان', 'آذر', 'دی', 'بهمن', 'اسفند'];
+       options.push({ value: `M:${ym}`, label: `${monthNames[parseInt(parts[1], 10) - 1] || 'ماه ' + parts[1]} ${parts[0]}` });
     });
     
     Array.from(weeks).sort().reverse().forEach(w => {
@@ -556,9 +913,9 @@ app.get("/api/dashboard", async (req, res) => {
         `
       SELECT 
         SUBSTR(json_extract_string(data, '$.date'), 1, 7) as monthStr,
-        SUM(coalesce(CAST(json_extract_string(data, '$.totalPrice') AS REAL), CAST(REPLACE(json_extract_string(data, '$.quantity'), ',', '') AS REAL) * CAST(json_extract_string(data, '$.price') AS REAL)) * CASE WHEN f.module_type = 'sales_returns' THEN -1 ELSE 1 END) as amount
+        SUM((coalesce(TRY_CAST(json_extract_string(data, '$.totalPrice') AS REAL), TRY_CAST(REPLACE(json_extract_string(data, '$.quantity'), ',', '') AS REAL) * TRY_CAST(json_extract_string(data, '$.price') AS REAL)) - coalesce(TRY_CAST(json_extract_string(data, '$.discount') AS REAL), 0) - coalesce(TRY_CAST(json_extract_string(data, '$.discountLevel1') AS REAL), 0) - coalesce(TRY_CAST(json_extract_string(data, '$.discountLevel2') AS REAL), 0)) * CASE WHEN f.module_type = 'sales_returns' THEN -1 ELSE 1 END) as amount
       FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type IN ('sales', ${netMode ? "'sales_returns'" : "'sales'"})
-      AND json_extract_string(data, '$.date') LIKE ? || '%'
+      AND match_period(json_extract_string(data, '$.date'), ?)
       GROUP BY SUBSTR(json_extract_string(data, '$.date'), 1, 7)
     `, period) as any[];
 
@@ -577,19 +934,19 @@ app.get("/api/dashboard", async (req, res) => {
         `
       SELECT 
         coalesce(json_extract_string(data, '$.productName'), json_extract_string(data, '$.productCode'), 'نامشخص') as pName,
-        SUM(coalesce(CAST(json_extract_string(data, '$.totalPrice') AS REAL), CAST(REPLACE(json_extract_string(data, '$.quantity'), ',', '') AS REAL) * CAST(json_extract_string(data, '$.price') AS REAL)) * CASE WHEN f.module_type = 'sales_returns' THEN -1 ELSE 1 END) as amount
+        SUM((coalesce(TRY_CAST(json_extract_string(data, '$.totalPrice') AS REAL), TRY_CAST(REPLACE(json_extract_string(data, '$.quantity'), ',', '') AS REAL) * TRY_CAST(json_extract_string(data, '$.price') AS REAL)) - coalesce(TRY_CAST(json_extract_string(data, '$.discount') AS REAL), 0) - coalesce(TRY_CAST(json_extract_string(data, '$.discountLevel1') AS REAL), 0) - coalesce(TRY_CAST(json_extract_string(data, '$.discountLevel2') AS REAL), 0)) * CASE WHEN f.module_type = 'sales_returns' THEN -1 ELSE 1 END) as amount
       FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type IN ('sales', ${netMode ? "'sales_returns'" : "'sales'"})
-      AND json_extract_string(data, '$.date') LIKE ? || '%'
+      AND match_period(json_extract_string(data, '$.date'), ?)
       GROUP BY coalesce(json_extract_string(data, '$.productName'), json_extract_string(data, '$.productCode'), 'نامشخص')
       ORDER BY amount DESC LIMIT 10
     `, period);
 
     let cumSum = 0;
     const paretoData = productSalesAgg.map((row: any) => {
-      cumSum += Math.max(0, row.amount || 0);
+      cumSum += Math.max(0, Number(row.amount) || 0);
       return {
         name: row.pName,
-        value: Math.max(0, row.amount || 0),
+        value: Math.max(0, Number(row.amount) || 0),
         percentage: totalSales > 0 ? (cumSum / totalSales) * 100 : 0,
       };
     });
@@ -597,9 +954,9 @@ app.get("/api/dashboard", async (req, res) => {
     const getInvValue = async (modType: string, qtyField: string = '$.quantity') => {
       const res = (await db.all(
           `
-         SELECT SUM(CAST(REPLACE(json_extract_string(data, '${qtyField}'), ',', '') AS REAL) * CAST(REPLACE(coalesce(json_extract_string(data, '$.price'), '0'), ',', '') AS REAL)) as val
+         SELECT SUM(TRY_CAST(REPLACE(json_extract_string(data, '${qtyField}'), ',', '') AS REAL) * CAST(REPLACE(coalesce(json_extract_string(data, '$.price'), '0'), ',', '') AS REAL)) as val
          FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type = ?
-         AND json_extract_string(data, '$.date') LIKE ? || '%'
+         AND match_period(json_extract_string(data, '$.date'), ?)
        `, modType, period))[0] as any;
       return res?.val || 0;
     };
@@ -617,26 +974,26 @@ app.get("/api/dashboard", async (req, res) => {
     const finAgg = (await db.all(
         `
       SELECT 
-        SUM(CASE WHEN json_extract_string(data, '$.transactionType') LIKE '%خروج%' OR CAST(json_extract_string(data, '$.amount') AS REAL) < 0 THEN ABS(CAST(json_extract_string(data, '$.amount') AS REAL)) ELSE 0 END) as outcome,
-        SUM(CASE WHEN NOT (json_extract_string(data, '$.transactionType') LIKE '%خروج%' OR CAST(json_extract_string(data, '$.amount') AS REAL) < 0) THEN ABS(CAST(json_extract_string(data, '$.amount') AS REAL)) ELSE 0 END) as income
+        SUM(CASE WHEN json_extract_string(data, '$.transactionType') LIKE '%خروج%' OR TRY_CAST(json_extract_string(data, '$.amount') AS REAL) < 0 THEN ABS(TRY_CAST(json_extract_string(data, '$.amount') AS REAL)) ELSE 0 END) as outcome,
+        SUM(CASE WHEN NOT (json_extract_string(data, '$.transactionType') LIKE '%خروج%' OR TRY_CAST(json_extract_string(data, '$.amount') AS REAL) < 0) THEN ABS(TRY_CAST(json_extract_string(data, '$.amount') AS REAL)) ELSE 0 END) as income
       FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type IN ('finance_cash', 'finance_bank')
-      AND json_extract_string(data, '$.date') LIKE ? || '%'
+      AND match_period(json_extract_string(data, '$.date'), ?)
     `, period))[0] as any;
 
     let profit = (finAgg?.income || 0) - (finAgg?.outcome || 0);
 
     // Get Top / Bottom selling products and categories for extra cards
-    const topProd = (await db.all(`SELECT coalesce(json_extract_string(data, '$.productName'), json_extract_string(data, '$.productCode'), 'نامشخص') as name, SUM(coalesce(CAST(json_extract_string(data, '$.totalPrice') AS REAL), CAST(REPLACE(json_extract_string(data, '$.quantity'), ',', '') AS REAL) * CAST(json_extract_string(data, '$.price') AS REAL)) * CASE WHEN f.module_type = 'sales_returns' THEN -1 ELSE 1 END) as amt FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type IN ('sales', ${netMode ? "'sales_returns'" : "'sales'"}) AND json_extract_string(data, '$.date') LIKE ? || '%' GROUP BY name ORDER BY amt DESC LIMIT 1`, period))[0] as any;
+    const topProd = (await db.all(`SELECT coalesce(json_extract_string(data, '$.productName'), json_extract_string(data, '$.productCode'), 'نامشخص') as name, SUM((coalesce(TRY_CAST(json_extract_string(data, '$.totalPrice') AS REAL), TRY_CAST(REPLACE(json_extract_string(data, '$.quantity'), ',', '') AS REAL) * TRY_CAST(json_extract_string(data, '$.price') AS REAL)) - coalesce(TRY_CAST(json_extract_string(data, '$.discount') AS REAL), 0) - coalesce(TRY_CAST(json_extract_string(data, '$.discountLevel1') AS REAL), 0) - coalesce(TRY_CAST(json_extract_string(data, '$.discountLevel2') AS REAL), 0)) * CASE WHEN f.module_type = 'sales_returns' THEN -1 ELSE 1 END) as amt FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type IN ('sales', ${netMode ? "'sales_returns'" : "'sales'"}) AND match_period(json_extract_string(data, '$.date'), ?) GROUP BY name ORDER BY amt DESC LIMIT 1`, period))[0] as any;
     
-    const botProd = (await db.all(`SELECT coalesce(json_extract_string(data, '$.productName'), json_extract_string(data, '$.productCode'), 'نامشخص') as name, SUM(coalesce(CAST(json_extract_string(data, '$.totalPrice') AS REAL), CAST(REPLACE(json_extract_string(data, '$.quantity'), ',', '') AS REAL) * CAST(json_extract_string(data, '$.price') AS REAL)) * CASE WHEN f.module_type = 'sales_returns' THEN -1 ELSE 1 END) as amt FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type IN ('sales', ${netMode ? "'sales_returns'" : "'sales'"}) AND json_extract_string(data, '$.date') LIKE ? || '%' GROUP BY name HAVING amt > 0 ORDER BY amt ASC LIMIT 1`, period))[0] as any;
+    const botProd = (await db.all(`SELECT coalesce(json_extract_string(data, '$.productName'), json_extract_string(data, '$.productCode'), 'نامشخص') as name, SUM((coalesce(TRY_CAST(json_extract_string(data, '$.totalPrice') AS REAL), TRY_CAST(REPLACE(json_extract_string(data, '$.quantity'), ',', '') AS REAL) * TRY_CAST(json_extract_string(data, '$.price') AS REAL)) - coalesce(TRY_CAST(json_extract_string(data, '$.discount') AS REAL), 0) - coalesce(TRY_CAST(json_extract_string(data, '$.discountLevel1') AS REAL), 0) - coalesce(TRY_CAST(json_extract_string(data, '$.discountLevel2') AS REAL), 0)) * CASE WHEN f.module_type = 'sales_returns' THEN -1 ELSE 1 END) as amt FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type IN ('sales', ${netMode ? "'sales_returns'" : "'sales'"}) AND match_period(json_extract_string(data, '$.date'), ?) GROUP BY name HAVING amt > 0 ORDER BY amt ASC LIMIT 1`, period))[0] as any;
 
-    const topDate = (await db.all(`SELECT json_extract_string(data, '$.date') as date, SUM(coalesce(CAST(json_extract_string(data, '$.totalPrice') AS REAL), CAST(REPLACE(json_extract_string(data, '$.quantity'), ',', '') AS REAL) * CAST(json_extract_string(data, '$.price') AS REAL)) * CASE WHEN f.module_type = 'sales_returns' THEN -1 ELSE 1 END) as amt FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type IN ('sales', ${netMode ? "'sales_returns'" : "'sales'"}) AND json_extract_string(data, '$.date') LIKE ? || '%' GROUP BY date ORDER BY amt DESC LIMIT 1`, period))[0] as any;
+    const topDate = (await db.all(`SELECT json_extract_string(data, '$.date') as date, SUM((coalesce(TRY_CAST(json_extract_string(data, '$.totalPrice') AS REAL), TRY_CAST(REPLACE(json_extract_string(data, '$.quantity'), ',', '') AS REAL) * TRY_CAST(json_extract_string(data, '$.price') AS REAL)) - coalesce(TRY_CAST(json_extract_string(data, '$.discount') AS REAL), 0) - coalesce(TRY_CAST(json_extract_string(data, '$.discountLevel1') AS REAL), 0) - coalesce(TRY_CAST(json_extract_string(data, '$.discountLevel2') AS REAL), 0)) * CASE WHEN f.module_type = 'sales_returns' THEN -1 ELSE 1 END) as amt FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type IN ('sales', ${netMode ? "'sales_returns'" : "'sales'"}) AND match_period(json_extract_string(data, '$.date'), ?) GROUP BY date ORDER BY amt DESC LIMIT 1`, period))[0] as any;
 
     const negativeAdjustments = (await db.all(
-        `SELECT SUM(CAST(REPLACE(json_extract_string(data, '$.adjustmentQuantity'), ',', '') AS REAL) * CAST(REPLACE(coalesce(json_extract_string(data, '$.price'), '0'), ',', '') AS REAL)) as val
+        `SELECT SUM(TRY_CAST(REPLACE(json_extract_string(data, '$.adjustmentQuantity'), ',', '') AS REAL) * CAST(REPLACE(coalesce(json_extract_string(data, '$.price'), '0'), ',', '') AS REAL)) as val
          FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type = 'inventory_adjustments'
-         AND CAST(REPLACE(json_extract_string(data, '$.adjustmentQuantity'), ',', '') AS REAL) < 0
-         AND json_extract_string(data, '$.date') LIKE ? || '%'`
+         AND TRY_CAST(REPLACE(json_extract_string(data, '$.adjustmentQuantity'), ',', '') AS REAL) < 0
+         AND match_period(json_extract_string(data, '$.date'), ?)`
       , period))[0] as any;
 
     const shrinkValue = Math.abs(negativeAdjustments?.val || 0);
@@ -671,16 +1028,13 @@ app.get("/api/cost-centers", async (req, res) => {
   const centers = await db.all("SELECT * FROM cost_centers");
   
   // Get all available accounts globally
-  const financeRows = await db.all("SELECT data FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type = 'finance_expense'");
+  const financeRows = await db.all("SELECT DISTINCT json_extract_string(data, '$.account') as account FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type = 'finance_expense'");
   const allAccounts = new Set<string>();
   for (const r of financeRows as any[]) {
-     try {
-       const parsed = JSON.parse(r.data);
-       const acc = parsed.account?.trim();
-       if (acc) {
-          allAccounts.add(acc);
-       }
-     } catch(e) {}
+     const acc = r.account?.trim();
+     if (acc) {
+        allAccounts.add(acc);
+     }
   }
   const globalAccounts = Array.from(allAccounts);
 
@@ -695,15 +1049,16 @@ app.get("/api/cost-centers", async (req, res) => {
 app.get("/api/product-categories", async (req, res) => {
   try {
     console.log("running advanced BI query 0");
-    const products = await db.all(
-        `SELECT data FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type = 'products'`)
-      .iterate();
+    const products = await db.all(`
+      SELECT 
+        json_extract_string(data, '$.mainGroup') as mainGroup,
+        json_extract_string(data, '$.subGroup') as subGroup
+      FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type = 'products'
+    `);
     const categories = new Set<string>();
-
-    for (const p of products) {
-      const parsed = JSON.parse((p as any).data);
-      const mg = typeof parsed.mainGroup === "string" ? parsed.mainGroup.trim() : "";
-      const sg = typeof parsed.subGroup === "string" ? parsed.subGroup.trim() : "";
+    for (const p of products as any[]) {
+      const mg = typeof p.mainGroup === "string" ? p.mainGroup.trim() : "";
+      const sg = typeof p.subGroup === "string" ? p.subGroup.trim() : "";
       
       if (mg) categories.add(mg);
       if (mg && sg) categories.add(mg + " - " + sg);
@@ -716,34 +1071,41 @@ app.get("/api/product-categories", async (req, res) => {
 });
 
 app.post("/api/cost-centers", (req, res, next) => { clearCache(); next(); }, async (req, res) => {
-  const { name, allocation_base, total_cost, target_categories, allocation_level, is_active, source_accounts } = req.body;
-  const info = await db.run(
-    name,
-    allocation_base,
-    total_cost,
-    target_categories || "",
-    allocation_level || 'level_1',
-    is_active === undefined ? 1 : is_active,
-    source_accounts || ""
-  );
-  res.json({ id: info.lastInsertRowid });
+  try {
+      const { name, allocation_base, total_cost, target_categories, allocation_level, is_active, source_accounts } = req.body;
+      const info = await db.run(
+        "INSERT INTO cost_centers (name, allocation_base, total_cost, target_categories, allocation_level, is_active, source_accounts) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        name,
+        allocation_base,
+        total_cost,
+        target_categories || "",
+        allocation_level || 'level_1',
+        is_active === undefined ? 1 : is_active,
+        source_accounts || ""
+      );
+      res.json({ id: info.lastInsertRowid });
+  } catch (e) {
+      console.error(e);
+      res.status(500).json({ error: "خطا در ثبت" });
+  }
 });
 
 app.post("/api/cost-centers/auto-sync", (req, res, next) => { clearCache(); next(); }, async (req, res) => {
   try {
     // Look into raw_data for finance module, aggregate by costCenter, and insert/update cost_centers
-    const financeData = await db.all(
-        `SELECT data FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type = 'finance_expense'`,
-      );
+    const financeData = await db.all(`
+      SELECT 
+        json_extract_string(data, '$.costCenter') as costCenter,
+        TRY_CAST(REPLACE(json_extract_string(data, '$.amount'), ',', '') AS REAL) as amount,
+        json_extract_string(data, '$.transactionType') as transactionType
+      FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type = 'finance_expense'
+    `);
     const costsByCenter: Record<string, number> = {};
-
-    for (const row of financeData) {
-      const parsed = JSON.parse((row as any).data);
-      if (parsed.costCenter && parsed.amount) {
-        const name = parsed.costCenter.trim();
-        // Convert amount string to number, filter only "خروجی/هزینه" if transactionType exists
-        const amount = parseFloat(String(parsed.amount || "").replace(/,/g, ''));
-        const tType = parsed.transactionType ? String(parsed.transactionType).trim() : "";
+    for (const row of financeData as any[]) {
+      if (row.costCenter && row.amount) {
+        const name = row.costCenter.trim();
+        const amount = Number(row.amount);
+        const tType = row.transactionType ? String(row.transactionType).trim() : "";
         if (tType && (tType.includes("ورود") || tType.includes("دریافت") || tType.includes("درآمد") || tType.includes("واریز"))) {
             continue; // Skip income/deposits if explicitly marked
         }
@@ -755,24 +1117,17 @@ app.post("/api/cost-centers/auto-sync", (req, res, next) => { clearCache(); next
 
     // Update DB
     let added = 0;
-    const existing = await db.all("SELECT name FROM cost_centers")
-      .map((c: any) => c.name);
+    const existingRows = await db.all("SELECT name FROM cost_centers");
+    const existing = existingRows.map((c) => c.name);
 
-    const insert = await db.all(
-      "INSERT INTO cost_centers (name, allocation_base, total_cost, target_categories) VALUES (?, ?, ?, ?)");
-    const update = await db.run(
-      "UPDATE cost_centers SET total_cost = ? WHERE name = ?");
-
-    db.transaction(() => {
-      for (const [center, total] of Object.entries(costsByCenter)) {
-        if (existing.includes(center)) {
-          update.run(total, center);
-        } else {
-          insert.run(center, "sales_value", total, "");
-          added++;
-        }
+    for (const [center, total] of Object.entries(costsByCenter)) {
+      if (existing.includes(center)) {
+        await db.run("UPDATE cost_centers SET total_cost = ? WHERE name = ?", total, center);
+      } else {
+        await db.run("INSERT INTO cost_centers (name, allocation_base, total_cost, target_categories) VALUES (?, ?, ?, ?)", center, "sales_value", total, "");
+        added++;
       }
-    })();
+    }
 
     res.json({
       message: "همگام‌سازی موفق",
@@ -786,8 +1141,13 @@ app.post("/api/cost-centers/auto-sync", (req, res, next) => { clearCache(); next
 });
 
 app.delete("/api/cost-centers/:id", (req, res, next) => { clearCache(); next(); }, async (req, res) => {
-  await db.all("DELETE FROM cost_centers WHERE id = ?", req.params.id);
-  res.json({ message: "مرکز هزینه حذف شد." });
+  try {
+      await db.run("DELETE FROM cost_centers WHERE id = ?", req.params.id);
+      res.json({ message: "مرکز هزینه حذف شد." });
+  } catch (e) {
+      console.error(e);
+      res.status(500).json({ error: "خطا در حذف" });
+  }
 });
 
 app.put("/api/cost-centers/:id", (req, res, next) => { clearCache(); next(); }, async (req, res) => {
@@ -845,17 +1205,17 @@ app.get("/api/reports/cost-control", async (req, res) => {
 
     // 1. Get total sales for the period
     console.log("running salesAgg"); const salesAgg = (await db.all(`
-      SELECT SUM(coalesce(CAST(json_extract_string(data, '$.totalPrice') AS REAL), CAST(REPLACE(json_extract_string(data, '$.quantity'), ',', '') AS REAL) * CAST(json_extract_string(data, '$.price') AS REAL)) * CASE WHEN f.module_type = 'sales_returns' THEN -1 ELSE 1 END) as amount
+      SELECT SUM((coalesce(TRY_CAST(json_extract_string(data, '$.totalPrice') AS REAL), TRY_CAST(REPLACE(json_extract_string(data, '$.quantity'), ',', '') AS REAL) * TRY_CAST(json_extract_string(data, '$.price') AS REAL)) - coalesce(TRY_CAST(json_extract_string(data, '$.discount') AS REAL), 0) - coalesce(TRY_CAST(json_extract_string(data, '$.discountLevel1') AS REAL), 0) - coalesce(TRY_CAST(json_extract_string(data, '$.discountLevel2') AS REAL), 0)) * CASE WHEN f.module_type = 'sales_returns' THEN -1 ELSE 1 END) as amount
       FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type IN ('sales', ${netMode ? "'sales_returns'" : "'sales'"})
-      AND json_extract_string(data, '$.date') LIKE ? || '%'
+      AND match_period(json_extract_string(data, '$.date'), ?)
     `, period))[0] as any;
     const totalSales = salesAgg?.amount || 0;
 
     // 2. Get total net income for the period (simplified: sales - cogs - expenses)
     const purchasesAgg = (await db.all(`
-      SELECT SUM(CAST(REPLACE(json_extract_string(data, '$.totalPrice'), ',', '') AS REAL)) as amount
+      SELECT SUM(TRY_CAST(REPLACE(json_extract_string(data, '$.totalPrice'), ',', '') AS REAL)) as amount
       FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type = 'purchases'
-      AND json_extract_string(data, '$.date') LIKE ? || '%'
+      AND match_period(json_extract_string(data, '$.date'), ?)
     `, period))[0] as any;
     const totalCOGS = purchasesAgg?.amount || 0;
 
@@ -864,9 +1224,9 @@ app.get("/api/reports/cost-control", async (req, res) => {
     if (tafsilFilter.length > 0) expParams.push(...tafsilFilter);
 
     const allExpensesAgg = (await db.all(`
-      SELECT SUM(CAST(REPLACE(json_extract_string(data, '$.amount'), ',', '') AS REAL)) as amount
+      SELECT SUM(TRY_CAST(REPLACE(json_extract_string(data, '$.amount'), ',', '') AS REAL)) as amount
       FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type = 'cost_control'
-      AND json_extract_string(data, '$.date') LIKE ? || '%'
+      AND match_period(json_extract_string(data, '$.date'), ?)
       ${filterConditions}
     `, ...expParams))[0] as any;
     const totalAllExpenses = allExpensesAgg?.amount || 0;
@@ -878,16 +1238,16 @@ app.get("/api/reports/cost-control", async (req, res) => {
     let compareTotalCOGS = 0;
     if (comparePeriod) {
        console.log("running compSalesAgg"); const compSalesAgg = (await db.all(`
-         SELECT SUM(coalesce(CAST(json_extract_string(data, '$.totalPrice') AS REAL), CAST(REPLACE(json_extract_string(data, '$.quantity'), ',', '') AS REAL) * CAST(json_extract_string(data, '$.price') AS REAL)) * CASE WHEN f.module_type = 'sales_returns' THEN -1 ELSE 1 END) as amount
+         SELECT SUM((coalesce(TRY_CAST(json_extract_string(data, '$.totalPrice') AS REAL), TRY_CAST(REPLACE(json_extract_string(data, '$.quantity'), ',', '') AS REAL) * TRY_CAST(json_extract_string(data, '$.price') AS REAL)) - coalesce(TRY_CAST(json_extract_string(data, '$.discount') AS REAL), 0) - coalesce(TRY_CAST(json_extract_string(data, '$.discountLevel1') AS REAL), 0) - coalesce(TRY_CAST(json_extract_string(data, '$.discountLevel2') AS REAL), 0)) * CASE WHEN f.module_type = 'sales_returns' THEN -1 ELSE 1 END) as amount
          FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type IN ('sales', ${netMode ? "'sales_returns'" : "'sales'"})
-         AND json_extract_string(data, '$.date') LIKE ? || '%'
+         AND match_period(json_extract_string(data, '$.date'), ?)
        `, comparePeriod))[0] as any;
        compareTotalSales = compSalesAgg?.amount || 0;
 
        const compCOGSAgg = (await db.all(`
-         SELECT SUM(CAST(REPLACE(json_extract_string(data, '$.totalPrice'), ',', '') AS REAL)) as amount
+         SELECT SUM(TRY_CAST(REPLACE(json_extract_string(data, '$.totalPrice'), ',', '') AS REAL)) as amount
          FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type = 'purchases'
-         AND json_extract_string(data, '$.date') LIKE ? || '%'
+         AND match_period(json_extract_string(data, '$.date'), ?)
        `, comparePeriod))[0] as any;
        compareTotalCOGS = compCOGSAgg?.amount || 0;
 
@@ -896,9 +1256,9 @@ app.get("/api/reports/cost-control", async (req, res) => {
        if (tafsilFilter.length > 0) compExpParams.push(...tafsilFilter);
 
        const compAllExpensesAgg = (await db.all(`
-         SELECT SUM(CAST(REPLACE(json_extract_string(data, '$.amount'), ',', '') AS REAL)) as amount
+         SELECT SUM(TRY_CAST(REPLACE(json_extract_string(data, '$.amount'), ',', '') AS REAL)) as amount
          FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type = 'cost_control'
-         AND json_extract_string(data, '$.date') LIKE ? || '%'
+         AND match_period(json_extract_string(data, '$.date'), ?)
          ${filterConditions}
        `, ...compExpParams))[0] as any;
        compareTotalAllExpenses = compAllExpensesAgg?.amount || 0;
@@ -912,10 +1272,10 @@ app.get("/api/reports/cost-control", async (req, res) => {
     const currentExpenses = await db.all(`
       SELECT 
         json_extract_string(data, '$.${analysisField}') as account,
-        SUM(CAST(REPLACE(json_extract_string(data, '$.amount'), ',', '') AS REAL)) as total
+        SUM(TRY_CAST(REPLACE(json_extract_string(data, '$.amount'), ',', '') AS REAL)) as total
       FROM raw_data r JOIN files f ON r.file_id = f.id 
       WHERE f.module_type = 'cost_control' 
-      AND json_extract_string(data, '$.date') LIKE ? || '%'
+      AND match_period(json_extract_string(data, '$.date'), ?)
       ${filterConditions}
       GROUP BY json_extract_string(data, '$.${analysisField}')
       ORDER BY total DESC
@@ -929,10 +1289,10 @@ app.get("/api/reports/cost-control", async (req, res) => {
     const compareExpenses = comparePeriod ? await db.all(`
       SELECT 
         json_extract_string(data, '$.${analysisField}') as account,
-        SUM(CAST(REPLACE(json_extract_string(data, '$.amount'), ',', '') AS REAL)) as total
+        SUM(TRY_CAST(REPLACE(json_extract_string(data, '$.amount'), ',', '') AS REAL)) as total
       FROM raw_data r JOIN files f ON r.file_id = f.id 
       WHERE f.module_type = 'cost_control' 
-      AND json_extract_string(data, '$.date') LIKE ? || '%'
+      AND match_period(json_extract_string(data, '$.date'), ?)
       ${filterConditions}
       GROUP BY json_extract_string(data, '$.${analysisField}')
     `, ...paramsCompare) as any[] : [];
@@ -949,7 +1309,7 @@ app.get("/api/reports/cost-control", async (req, res) => {
       SELECT 
         json_extract_string(data, '$.${analysisField}') as account,
         json_extract_string(data, '$.date') as date,
-        CAST(REPLACE(json_extract_string(data, '$.amount'), ',', '') AS REAL) as amount
+        TRY_CAST(REPLACE(json_extract_string(data, '$.amount'), ',', '') AS REAL) as amount
       FROM raw_data r JOIN files f ON r.file_id = f.id 
       WHERE f.module_type = 'cost_control'
       ${filterConditions}
@@ -959,7 +1319,7 @@ app.get("/api/reports/cost-control", async (req, res) => {
     const rawSales = await db.all(`
       SELECT 
         json_extract_string(data, '$.date') as date,
-        coalesce(CAST(json_extract_string(data, '$.totalPrice') AS REAL), CAST(REPLACE(json_extract_string(data, '$.quantity'), ',', '') AS REAL) * CAST(json_extract_string(data, '$.price') AS REAL)) * CASE WHEN f.module_type = 'sales_returns' THEN -1 ELSE 1 END as amount
+        (coalesce(TRY_CAST(json_extract_string(data, '$.totalPrice') AS REAL), TRY_CAST(REPLACE(json_extract_string(data, '$.quantity'), ',', '') AS REAL) * TRY_CAST(json_extract_string(data, '$.price') AS REAL)) - coalesce(TRY_CAST(json_extract_string(data, '$.discount') AS REAL), 0) - coalesce(TRY_CAST(json_extract_string(data, '$.discountLevel1') AS REAL), 0) - coalesce(TRY_CAST(json_extract_string(data, '$.discountLevel2') AS REAL), 0)) * CASE WHEN f.module_type = 'sales_returns' THEN -1 ELSE 1 END as amount
       FROM raw_data r JOIN files f ON r.file_id = f.id 
       WHERE f.module_type IN ('sales', ${netMode ? "'sales_returns'" : "'sales'"})
     `) as any[];
@@ -1153,9 +1513,9 @@ app.get("/api/reports/cost-control/comprehensive", async (req, res) => {
       SELECT 
         json_extract_string(data, '$.account') as account,
         json_extract_string(data, '$.tafsil') as tafsil,
-        SUM(CAST(REPLACE(json_extract_string(data, '$.amount'), ',', '') AS REAL)) as total
+        SUM(TRY_CAST(REPLACE(json_extract_string(data, '$.amount'), ',', '') AS REAL)) as total
       FROM raw_data r JOIN files f ON r.file_id = f.id 
-      WHERE f.module_type = 'cost_control' AND json_extract_string(data, '$.date') LIKE ? || '%' ${filterClause}
+      WHERE f.module_type = 'cost_control' AND match_period(json_extract_string(data, '$.date'), ?) ${filterClause}
       GROUP BY json_extract_string(data, '$.account'), json_extract_string(data, '$.tafsil')
     `, ...currentParams) as any[];
 
@@ -1168,9 +1528,9 @@ app.get("/api/reports/cost-control/comprehensive", async (req, res) => {
          SELECT 
            json_extract_string(data, '$.account') as account,
            json_extract_string(data, '$.tafsil') as tafsil,
-           SUM(CAST(REPLACE(json_extract_string(data, '$.amount'), ',', '') AS REAL)) as total
+           SUM(TRY_CAST(REPLACE(json_extract_string(data, '$.amount'), ',', '') AS REAL)) as total
          FROM raw_data r JOIN files f ON r.file_id = f.id 
-         WHERE f.module_type = 'cost_control' AND json_extract_string(data, '$.date') LIKE ? || '%' ${filterClause}
+         WHERE f.module_type = 'cost_control' AND match_period(json_extract_string(data, '$.date'), ?) ${filterClause}
          GROUP BY json_extract_string(data, '$.account'), json_extract_string(data, '$.tafsil')
        `, ...compareParams) as any[];
 
@@ -1229,19 +1589,23 @@ app.get("/api/reports/cost-allocation", async (req, res) => {
     `,
       );
 
-    // 2 & 3. Get all transactions (Sales, Purchases, Returns)
+    // 2 & 3. Get all transactions aggregated by code and module_type
     const transactions = await db.all(
         `
       SELECT 
-       json_extract_string(data, '$.productCode') as code, json_extract_string(data, '$.productName') as name,
-       CAST(REPLACE(json_extract_string(data, '$.quantity'), ',', '') AS REAL) as qty,
-       CAST(json_extract_string(data, '$.price') AS REAL) as price, CAST(json_extract_string(data, '$.totalPrice') AS REAL) as totalPrice,
-       json_extract_string(data, '$.invoiceCode') as invCode,
-       json_extract_string(data, '$.receiptCode') as recCode,
-       SUBSTR(coalesce(json_extract_string(data, '$.time'), '12:00'), 1, 2) as hour,
-       f.module_type
-      FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type IN ('sales', 'purchases', ${netMode ? "'sales_returns'" : "'sales'"}, ${netMode ? "'purchase_returns'" : "'purchases'"})
-      AND json_extract_string(data, '$.date') LIKE ? || '%'
+       json_extract_string(data, '$.productCode') as code,
+       f.module_type,
+       SUM(TRY_CAST(REPLACE(json_extract_string(data, '$.quantity'), ',', '') AS REAL) * TRY_CAST(json_extract_string(data, '$.price') AS REAL)) as totalVal,
+       SUM(TRY_CAST(REPLACE(json_extract_string(data, '$.quantity'), ',', '') AS REAL)) as totalQty,
+       COUNT(*) as lines,
+       SUM(TRY_CAST(json_extract_string(data, '$.price') AS REAL)) as priceTotal,
+       SUM(TRY_CAST(SUBSTR(coalesce(json_extract_string(data, '$.time'), '12:00'), 1, 2) AS INTEGER)) as hours,
+       COUNT(DISTINCT json_extract_string(data, '$.invoiceCode')) as sInvoices,
+       COUNT(DISTINCT json_extract_string(data, '$.receiptCode')) as pInvoices
+      FROM raw_data r JOIN files f ON r.file_id = f.id 
+      WHERE f.module_type IN ('sales', 'purchases', ${netMode ? "'sales_returns'" : "'sales'"}, ${netMode ? "'purchase_returns'" : "'purchases'"})
+      AND match_period(json_extract_string(data, '$.date'), ?)
+      GROUP BY code, f.module_type
     `
       , salesPeriod);
 
@@ -1250,33 +1614,38 @@ app.get("/api/reports/cost-allocation", async (req, res) => {
     // Filter out inactive cost centers for calculation
     const costCenters = allCostCenters.filter(cc => cc.is_active === 1 || cc.is_active === undefined || cc.is_active === true);
 
-    
+    const allSyncedCentersRows = await db.all("SELECT json_extract_string(data, '$.costCenter') as cc FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type = 'finance_expense'");
     const allSyncedCenters = new Set(
-        (await db.all("SELECT json_extract_string(data, '$.costCenter') as cc FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type = 'finance_expense'")).map((r: any) => r.cc?.trim()).filter(Boolean)
+        allSyncedCentersRows.map((r) => r.cc?.trim()).filter(Boolean)
     );
 
     // Get all available accounts globally
-    const financeRows = await db.all("SELECT data FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type = 'finance_expense'");
+    const financeRows = await db.all("SELECT DISTINCT json_extract_string(data, '$.account') as account FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type = 'finance_expense'");
     const allAccounts = new Set<string>();
     for (const r of financeRows as any[]) {
-       try {
-         const parsed = JSON.parse(r.data);
-         const acc = parsed.account?.trim();
-         if (acc) {
-            allAccounts.add(acc);
-         }
-       } catch(e) {}
+       const acc = r.account?.trim();
+       if (acc) {
+          allAccounts.add(acc);
+       }
     }
     const globalAccounts = Array.from(allAccounts);
 
-    const financeData = await db.all("SELECT data FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type = 'finance_expense' AND json_extract_string(data, '$.date') LIKE ? || '%'", costPeriod);
+    const financeData = await db.all(`
+      SELECT 
+        json_extract_string(data, '$.costCenter') as costCenter,
+        json_extract_string(data, '$.account') as account,
+        TRY_CAST(REPLACE(json_extract_string(data, '$.amount'), ',', '') AS REAL) as amount,
+        json_extract_string(data, '$.transactionType') as transactionType
+      FROM raw_data r JOIN files f ON r.file_id = f.id 
+      WHERE f.module_type = 'finance_expense' 
+      AND match_period(json_extract_string(data, '$.date'), ?)
+    `, costPeriod);
         
     const periodCostsByCenter: Record<string, number> = {};
-    for (const row of financeData) {
-        const parsed = JSON.parse((row as any).data);
-        if (parsed.costCenter && parsed.amount) {
-            const center = parsed.costCenter.trim();
-            const account = parsed.account ? parsed.account.trim() : "";
+    for (const row of financeData as any[]) {
+        if (row.costCenter && row.amount) {
+            const center = row.costCenter.trim();
+            const account = row.account ? row.account.trim() : "";
             
             const centerConfig = costCenters.find(c => c.name === center);
             if (centerConfig && centerConfig.source_accounts) {
@@ -1286,17 +1655,18 @@ app.get("/api/reports/cost-allocation", async (req, res) => {
                  }
             }
 
-            const amount = parseFloat(String(parsed.amount || "").replace(/,/g, ''));
-            const tType = parsed.transactionType ? String(parsed.transactionType).trim() : "";
+            const amount = Number(row.amount);
+            const tType = row.transactionType ? String(row.transactionType).trim() : "";
             if (tType && (tType.includes("ورود") || tType.includes("دریافت") || tType.includes("درآمد") || tType.includes("واریز"))) {
                 continue;
             }
+
             if (!isNaN(amount)) {
                 periodCostsByCenter[center] = (periodCostsByCenter[center] || 0) + amount;
             }
-        }
     }
-
+        }
+    
     for (const c of costCenters) {
         if (allSyncedCenters.has(c.name)) {
             c.total_cost = periodCostsByCenter[c.name] || 0;
@@ -1335,50 +1705,51 @@ app.get("/api/reports/cost-allocation", async (req, res) => {
         categoryTotals[catKey] = {
           salesAmt: 0, purchaseAmt: 0, salesRetAmt: 0, pRetAmt: 0,
           qtySales: 0, qtyPurchase: 0, qtySalesRet: 0, qtyPRet: 0,
-          sInvoices: new Set(), pInvoices: new Set(), sRetInvoices: new Set(), pRetInvoices: new Set(),
+          sInvoicesCount: 0, pInvoicesCount: 0, sRetInvoicesCount: 0, pRetInvoicesCount: 0,
           sLines: 0, pLines: 0, sRetLines: 0, pRetLines: 0,
           sPriceTotal: 0, pPriceTotal: 0, sRetPriceTotal: 0, pRetPriceTotal: 0,
           sHours: 0, pHours: 0, sRetHours: 0, pRetHours: 0,
           allocatedCost: 0
         };
 
-      const val = (row.qty || 0) * (row.price || 0);
-      const qty = row.qty || 0;
-      const price = row.price || 0;
-      const invCode = String(row.invCode || row.recCode || "unknown");
-      const hourStr = row.hour ? String(row.hour).replace(/\D/g, '') : "12";
-      const hour = parseInt(hourStr) || 12;
+      const val = Number(row.totalVal) || 0;
+      const qty = Number(row.totalQty) || 0;
+      const lines = Number(row.lines) || 0;
+      const priceTotal = Number(row.priceTotal) || 0;
+      const hours = Number(row.hours) || 0;
+      const sInvCount = Number(row.sInvoices) || 0;
+      const pInvCount = Number(row.pInvoices) || 0;
 
       if (row.module_type === 'sales') {
         categoryTotals[catKey].salesAmt += val;
         categoryTotals[catKey].qtySales += qty;
-        categoryTotals[catKey].sLines += 1;
-        categoryTotals[catKey].sPriceTotal += price;
-        categoryTotals[catKey].sHours += hour;
-        categoryTotals[catKey].sInvoices.add(invCode);
+        categoryTotals[catKey].sLines += lines;
+        categoryTotals[catKey].sPriceTotal += priceTotal;
+        categoryTotals[catKey].sHours += hours;
+        categoryTotals[catKey].sInvoicesCount += sInvCount;
         totalGlobalSales += val;
       } else if (row.module_type === 'purchases') {
         categoryTotals[catKey].purchaseAmt += val;
         categoryTotals[catKey].qtyPurchase += qty;
-        categoryTotals[catKey].pLines += 1;
-        categoryTotals[catKey].pPriceTotal += price;
-        categoryTotals[catKey].pHours += hour;
-        categoryTotals[catKey].pInvoices.add(invCode);
+        categoryTotals[catKey].pLines += lines;
+        categoryTotals[catKey].pPriceTotal += priceTotal;
+        categoryTotals[catKey].pHours += hours;
+        categoryTotals[catKey].pInvoicesCount += pInvCount;
         totalGlobalPurchases += val;
       } else if (row.module_type === 'sales_returns') {
         categoryTotals[catKey].salesRetAmt += val;
         categoryTotals[catKey].qtySalesRet += qty;
-        categoryTotals[catKey].sRetLines += 1;
-        categoryTotals[catKey].sRetPriceTotal += price;
-        categoryTotals[catKey].sRetHours += hour;
-        categoryTotals[catKey].sRetInvoices.add(invCode);
+        categoryTotals[catKey].sRetLines += lines;
+        categoryTotals[catKey].sRetPriceTotal += priceTotal;
+        categoryTotals[catKey].sRetHours += hours;
+        categoryTotals[catKey].sRetInvoicesCount += sInvCount;
       } else if (row.module_type === 'purchase_returns') {
         categoryTotals[catKey].pRetAmt += val;
         categoryTotals[catKey].qtyPRet += qty;
-        categoryTotals[catKey].pRetLines += 1;
-        categoryTotals[catKey].pRetPriceTotal += price;
-        categoryTotals[catKey].pRetHours += hour;
-        categoryTotals[catKey].pRetInvoices.add(invCode);
+        categoryTotals[catKey].pRetLines += lines;
+        categoryTotals[catKey].pRetPriceTotal += priceTotal;
+        categoryTotals[catKey].pRetHours += hours;
+        categoryTotals[catKey].pRetInvoicesCount += pInvCount;
       }
     }
 
@@ -1419,8 +1790,8 @@ app.get("/api/reports/cost-allocation", async (req, res) => {
          const pAmt = Math.max(0, netMode ? (cat.purchaseAmt - cat.pRetAmt) : cat.purchaseAmt);
          const sQty = Math.max(0, netMode ? (cat.qtySales - cat.qtySalesRet) : cat.qtySales);
          const pQty = Math.max(0, netMode ? (cat.qtyPurchase - cat.qtyPRet) : cat.qtyPurchase);
-         const sInvCount = Math.max(0, netMode ? (cat.sInvoices.size - cat.sRetInvoices.size) : cat.sInvoices.size);
-         const pInvCount = Math.max(0, netMode ? (cat.pInvoices.size - cat.pRetInvoices.size) : cat.pInvoices.size);
+         const sInvCount = Math.max(0, netMode ? (cat.sInvoicesCount - cat.sRetInvoicesCount) : cat.sInvoicesCount);
+         const pInvCount = Math.max(0, netMode ? (cat.pInvoicesCount - cat.pRetInvoicesCount) : cat.pInvoicesCount);
 
          // Original Bases
          if (cc.allocation_base === "sales_value" || cc.allocation_base === "sales_price") return sAmt;
@@ -1438,7 +1809,7 @@ app.get("/api/reports/cost-allocation", async (req, res) => {
          if (cc.allocation_base === "sales_and_purchase_invoice_count") return sInvCount + pInvCount;
          if (cc.allocation_base === "sales_and_purchase_price") return cat.sPriceTotal + cat.pPriceTotal;
          if (cc.allocation_base === "sales_and_purchase_and_returns_price") return cat.sPriceTotal + cat.pPriceTotal + cat.sRetPriceTotal + cat.pRetPriceTotal;
-         if (cc.allocation_base === "sales_and_purchase_and_returns_invoice_count") return cat.sInvoices.size + cat.pInvoices.size + cat.sRetInvoices.size + cat.pRetInvoices.size;
+         if (cc.allocation_base === "sales_and_purchase_and_returns_invoice_count") return cat.sInvoicesCount + cat.pInvoicesCount + cat.sRetInvoicesCount + cat.pRetInvoicesCount;
          if (cc.allocation_base === "sales_and_purchase_and_returns_qty") return cat.qtySales + cat.qtyPurchase + cat.qtySalesRet + cat.qtyPRet;
          if (cc.allocation_base === "sales_and_purchase_and_returns_hours") return cat.sHours + cat.pHours + cat.sRetHours + cat.pRetHours;
 
@@ -1604,7 +1975,7 @@ app.get("/api/reports/pareto", async (req, res) => {
     }
 
     // 2. Get Sales data including returns
-    const sales = await db.all(`SELECT json_extract_string(data, '$.productCode') as code, json_extract_string(data, '$.productName') as name, CAST(REPLACE(json_extract_string(data, '$.quantity'), ',', '') AS REAL) as qty, CAST(json_extract_string(data, '$.price') AS REAL) as price, CAST(json_extract_string(data, '$.totalPrice') AS REAL) as totalPrice, json_extract_string(data, '$.invoiceCode') as invCode, json_extract_string(data, '$.date') as date, f.module_type FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type IN ('sales', ${netMode ? "'sales_returns'" : "'sales'"}) AND json_extract_string(data, '$.date') LIKE ? || '%'`, period);
+    const sales = await db.all(`SELECT json_extract_string(data, '$.productCode') as code, json_extract_string(data, '$.productName') as name, TRY_CAST(REPLACE(json_extract_string(data, '$.quantity'), ',', '') AS REAL) as qty, TRY_CAST(json_extract_string(data, '$.price') AS REAL) as price, (coalesce(TRY_CAST(json_extract_string(data, '$.totalPrice') AS REAL), TRY_CAST(REPLACE(json_extract_string(data, '$.quantity'), ',', '') AS REAL) * TRY_CAST(json_extract_string(data, '$.price') AS REAL)) - coalesce(TRY_CAST(json_extract_string(data, '$.discount') AS REAL), 0) - coalesce(TRY_CAST(json_extract_string(data, '$.discountLevel1') AS REAL), 0) - coalesce(TRY_CAST(json_extract_string(data, '$.discountLevel2') AS REAL), 0)) as totalPrice, json_extract_string(data, '$.invoiceCode') as invCode, json_extract_string(data, '$.date') as date, f.module_type FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type IN ('sales', ${netMode ? "'sales_returns'" : "'sales'"}) AND match_period(json_extract_string(data, '$.date'), ?)`, period);
 
     // Dictionaries for aggregation
     const productStats: Record<string, { qty: number, amt: number, code: string, name: string, l1: string, l2: string, invoices: Set<string> }> = {};
@@ -1806,7 +2177,7 @@ app.get("/api/reports/weekly", async (req, res) => {
     }
 
     // 2. Get Sales data
-    const sales = await db.all("SELECT json_extract_string(data, '$.productCode') as code, json_extract_string(data, '$.productName') as name, CAST(REPLACE(json_extract_string(data, '$.quantity'), ',', '') AS REAL) as qty, CAST(json_extract_string(data, '$.price') AS REAL) as price, CAST(json_extract_string(data, '$.totalPrice') AS REAL) as totalPrice, json_extract_string(data, '$.date') as date, f.module_type FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type IN ('sales', 'sales_returns') AND json_extract_string(data, '$.date') LIKE ? || '%'", period);
+    const sales = await db.all("SELECT json_extract_string(data, '$.productCode') as code, json_extract_string(data, '$.productName') as name, TRY_CAST(REPLACE(json_extract_string(data, '$.quantity'), ',', '') AS REAL) as qty, TRY_CAST(json_extract_string(data, '$.price') AS REAL) as price, (coalesce(TRY_CAST(json_extract_string(data, '$.totalPrice') AS REAL), TRY_CAST(REPLACE(json_extract_string(data, '$.quantity'), ',', '') AS REAL) * TRY_CAST(json_extract_string(data, '$.price') AS REAL)) - coalesce(TRY_CAST(json_extract_string(data, '$.discount') AS REAL), 0) - coalesce(TRY_CAST(json_extract_string(data, '$.discountLevel1') AS REAL), 0) - coalesce(TRY_CAST(json_extract_string(data, '$.discountLevel2') AS REAL), 0)) as totalPrice, json_extract_string(data, '$.date') as date, f.module_type FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type IN ('sales', 'sales_returns') AND match_period(json_extract_string(data, '$.date'), ?)", period);
     
     const salesRows: any[] = [];
     let minJDN = Infinity;
@@ -1940,9 +2311,9 @@ app.get("/api/reports/sales", async (req, res) => {
        if (row.code) pMap[row.code] = { name: row.name || 'نامشخص', mainGrp: row.mainGrp || 'نامشخص', subGrp: row.subGrp || 'نامشخص' };
     }
 
-    const sales = await db.all("SELECT json_extract_string(data, '$.productCode') as code, json_extract_string(data, '$.productName') as name, CAST(REPLACE(json_extract_string(data, '$.quantity'), ',', '') AS REAL) as qty, CAST(json_extract_string(data, '$.price') AS REAL) as price, CAST(json_extract_string(data, '$.totalPrice') AS REAL) as totalPrice, SUBSTR(coalesce(json_extract_string(data, '$.time'), '12:00'), 1, 2) as hour, f.module_type FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type IN ('sales', 'sales_returns') AND json_extract_string(data, '$.date') LIKE ? || '%'", period);
+    const sales = await db.all("SELECT json_extract_string(data, '$.productCode') as code, json_extract_string(data, '$.productName') as name, TRY_CAST(REPLACE(json_extract_string(data, '$.quantity'), ',', '') AS REAL) as qty, TRY_CAST(json_extract_string(data, '$.price') AS REAL) as price, (coalesce(TRY_CAST(json_extract_string(data, '$.totalPrice') AS REAL), TRY_CAST(REPLACE(json_extract_string(data, '$.quantity'), ',', '') AS REAL) * TRY_CAST(json_extract_string(data, '$.price') AS REAL)) - coalesce(TRY_CAST(json_extract_string(data, '$.discount') AS REAL), 0) - coalesce(TRY_CAST(json_extract_string(data, '$.discountLevel1') AS REAL), 0) - coalesce(TRY_CAST(json_extract_string(data, '$.discountLevel2') AS REAL), 0)) as totalPrice, SUBSTR(coalesce(json_extract_string(data, '$.time'), '12:00'), 1, 2) as hour, f.module_type FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type IN ('sales', 'sales_returns') AND match_period(json_extract_string(data, '$.date'), ?)", period);
 
-    const purchases = await db.all("SELECT json_extract_string(data, '$.productCode') as code, json_extract_string(data, '$.productName') as name, CAST(REPLACE(json_extract_string(data, '$.quantity'), ',', '') AS REAL) as qty, CAST(json_extract_string(data, '$.price') AS REAL) as price, CAST(json_extract_string(data, '$.totalPrice') AS REAL) as totalPrice, f.module_type FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type IN ('purchases', 'purchase_returns') AND json_extract_string(data, '$.date') LIKE ? || '%'", period);
+    const purchases = await db.all("SELECT json_extract_string(data, '$.productCode') as code, json_extract_string(data, '$.productName') as name, TRY_CAST(REPLACE(json_extract_string(data, '$.quantity'), ',', '') AS REAL) as qty, TRY_CAST(json_extract_string(data, '$.price') AS REAL) as price, (coalesce(TRY_CAST(json_extract_string(data, '$.totalPrice') AS REAL), TRY_CAST(REPLACE(json_extract_string(data, '$.quantity'), ',', '') AS REAL) * TRY_CAST(json_extract_string(data, '$.price') AS REAL)) - coalesce(TRY_CAST(json_extract_string(data, '$.discount') AS REAL), 0) - coalesce(TRY_CAST(json_extract_string(data, '$.discountLevel1') AS REAL), 0) - coalesce(TRY_CAST(json_extract_string(data, '$.discountLevel2') AS REAL), 0)) as totalPrice, f.module_type FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type IN ('purchases', 'purchase_returns') AND match_period(json_extract_string(data, '$.date'), ?)", period);
 
     let totalVolume = 0;
     let totalQty = 0;
@@ -2097,9 +2468,9 @@ app.get("/api/reports/inventory", async (req, res) => {
 
     const aggregateQty = async (modType: string, multiplier: number, qtyField: string = '$.quantity') => {
       const dbres = (await db.all(`
-        SELECT SUM(CAST(REPLACE(json_extract_string(data, '${qtyField}'), ',', '') AS REAL)) as totalQty
+        SELECT SUM(TRY_CAST(REPLACE(json_extract_string(data, '${qtyField}'), ',', '') AS REAL)) as totalQty
         FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type = ?
-        AND json_extract_string(data, '$.date') LIKE ? || '%'
+        AND match_period(json_extract_string(data, '$.date'), ?)
       `, modType, period))[0] as any;
       currentStock += (dbres?.totalQty || 0) * multiplier;
     };
@@ -2120,7 +2491,7 @@ app.get("/api/reports/inventory", async (req, res) => {
        if (row.code) pMap[row.code] = { name: row.name || 'نامشخص', mainGrp: row.mainGrp || 'نامشخص', subGrp: row.subGrp || 'نامشخص' };
     }
 
-    const purchReturns = await db.all("SELECT json_extract_string(data, '$.productCode') as code, json_extract_string(data, '$.productName') as name, CAST(REPLACE(json_extract_string(data, '$.quantity'), ',', '') AS REAL) as qty, CAST(json_extract_string(data, '$.price') AS REAL) as price, CAST(json_extract_string(data, '$.totalPrice') AS REAL) as totalPrice FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type = 'purchase_returns' AND json_extract_string(data, '$.date') LIKE ? || '%'", period);
+    const purchReturns = await db.all("SELECT json_extract_string(data, '$.productCode') as code, json_extract_string(data, '$.productName') as name, TRY_CAST(REPLACE(json_extract_string(data, '$.quantity'), ',', '') AS REAL) as qty, TRY_CAST(json_extract_string(data, '$.price') AS REAL) as price, (coalesce(TRY_CAST(json_extract_string(data, '$.totalPrice') AS REAL), TRY_CAST(REPLACE(json_extract_string(data, '$.quantity'), ',', '') AS REAL) * TRY_CAST(json_extract_string(data, '$.price') AS REAL)) - coalesce(TRY_CAST(json_extract_string(data, '$.discount') AS REAL), 0) - coalesce(TRY_CAST(json_extract_string(data, '$.discountLevel1') AS REAL), 0) - coalesce(TRY_CAST(json_extract_string(data, '$.discountLevel2') AS REAL), 0)) as totalPrice FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type = 'purchase_returns' AND match_period(json_extract_string(data, '$.date'), ?)", period);
 
     const retL1: Record<string, any> = {};
     const retL2: Record<string, any> = {};
@@ -2153,7 +2524,7 @@ app.get("/api/reports/inventory", async (req, res) => {
 
     // Suppliers Analysis
     const supplierStats: Record<string, any> = {};
-    const purchasesIt = await db.all("SELECT json_extract_string(data, '$.supplier') as supplier, json_extract_string(data, '$.productCode') as code, json_extract_string(data, '$.productName') as name, CAST(REPLACE(json_extract_string(data, '$.quantity'), ',', '') AS REAL) as qty, CAST(json_extract_string(data, '$.price') AS REAL) as price, CAST(json_extract_string(data, '$.totalPrice') AS REAL) as totalPrice FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type = 'purchases' AND json_extract_string(data, '$.date') LIKE ? || '%'", period);
+    const purchasesIt = await db.all("SELECT json_extract_string(data, '$.supplier') as supplier, json_extract_string(data, '$.productCode') as code, json_extract_string(data, '$.productName') as name, TRY_CAST(REPLACE(json_extract_string(data, '$.quantity'), ',', '') AS REAL) as qty, TRY_CAST(json_extract_string(data, '$.price') AS REAL) as price, (coalesce(TRY_CAST(json_extract_string(data, '$.totalPrice') AS REAL), TRY_CAST(REPLACE(json_extract_string(data, '$.quantity'), ',', '') AS REAL) * TRY_CAST(json_extract_string(data, '$.price') AS REAL)) - coalesce(TRY_CAST(json_extract_string(data, '$.discount') AS REAL), 0) - coalesce(TRY_CAST(json_extract_string(data, '$.discountLevel1') AS REAL), 0) - coalesce(TRY_CAST(json_extract_string(data, '$.discountLevel2') AS REAL), 0)) as totalPrice FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type = 'purchases' AND match_period(json_extract_string(data, '$.date'), ?)", period);
 
     for (const p of purchasesIt) {
        const row = p as any;
@@ -2167,7 +2538,7 @@ app.get("/api/reports/inventory", async (req, res) => {
        supplierStats[supplier].purchAmt += amt;
     }
 
-    const purchReturnsFull = await db.all("SELECT json_extract_string(data, '$.supplier') as supplier, json_extract_string(data, '$.productCode') as code, json_extract_string(data, '$.productName') as name, CAST(REPLACE(json_extract_string(data, '$.quantity'), ',', '') AS REAL) as qty, CAST(json_extract_string(data, '$.price') AS REAL) as price, CAST(json_extract_string(data, '$.totalPrice') AS REAL) as totalPrice FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type = 'purchase_returns' AND json_extract_string(data, '$.date') LIKE ? || '%'", period);
+    const purchReturnsFull = await db.all("SELECT json_extract_string(data, '$.supplier') as supplier, json_extract_string(data, '$.productCode') as code, json_extract_string(data, '$.productName') as name, TRY_CAST(REPLACE(json_extract_string(data, '$.quantity'), ',', '') AS REAL) as qty, TRY_CAST(json_extract_string(data, '$.price') AS REAL) as price, (coalesce(TRY_CAST(json_extract_string(data, '$.totalPrice') AS REAL), TRY_CAST(REPLACE(json_extract_string(data, '$.quantity'), ',', '') AS REAL) * TRY_CAST(json_extract_string(data, '$.price') AS REAL)) - coalesce(TRY_CAST(json_extract_string(data, '$.discount') AS REAL), 0) - coalesce(TRY_CAST(json_extract_string(data, '$.discountLevel1') AS REAL), 0) - coalesce(TRY_CAST(json_extract_string(data, '$.discountLevel2') AS REAL), 0)) as totalPrice FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type = 'purchase_returns' AND match_period(json_extract_string(data, '$.date'), ?)", period);
 
     for (const pr of purchReturnsFull) {
        const row = pr as any;
@@ -2199,7 +2570,7 @@ app.get("/api/reports/inventory", async (req, res) => {
     };
 
     const runQtyQuery = async (modType: string, field: string, qtyField: string = '$.quantity') => {
-        const iter = await db.all(`SELECT json_extract_string(data, '$.productCode') as code, json_extract_string(data, '$.productName') as name, CAST(REPLACE(json_extract_string(data, '${qtyField}'), ',', '') AS REAL) as qty FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type = ? AND json_extract_string(data, '$.date') LIKE ? || '%'`, modType, period);
+        const iter = await db.all(`SELECT json_extract_string(data, '$.productCode') as code, json_extract_string(data, '$.productName') as name, TRY_CAST(REPLACE(json_extract_string(data, '${qtyField}'), ',', '') AS REAL) as qty FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type = ? AND match_period(json_extract_string(data, '$.date'), ?)`, modType, period);
         for (const row of iter) {
             const code = (row as any).code || 'unknown';
             initProdStat(code);
@@ -2271,12 +2642,15 @@ app.get("/api/reports/profit", async (req, res) => {
       json_extract_string(data, '$.time') as time,
       json_extract_string(data, '$.productCode') as code, json_extract_string(data, '$.productName') as name,
       json_extract_string(data, '$.productName') as productName,
-      CAST(REPLACE(json_extract_string(data, '$.quantity'), ',', '') AS REAL) as qty,
-      CAST(REPLACE(json_extract_string(data, '$.adjustmentQuantity'), ',', '') AS REAL) as adjQty,
-      CAST(REPLACE(json_extract_string(data, '$.price'), ',', '') AS REAL) as price,
-      CAST(REPLACE(json_extract_string(data, '$.totalPrice'), ',', '') AS REAL) as totalPrice,
+      TRY_CAST(REPLACE(json_extract_string(data, '$.quantity'), ',', '') AS REAL) as qty,
+      TRY_CAST(REPLACE(json_extract_string(data, '$.adjustmentQuantity'), ',', '') AS REAL) as adjQty,
+      TRY_CAST(REPLACE(json_extract_string(data, '$.price'), ',', '') AS REAL) as price,
+      TRY_CAST(REPLACE(json_extract_string(data, '$.totalPrice'), ',', '') AS REAL) as totalPrice,
+      TRY_CAST(REPLACE(json_extract_string(data, '$.discount'), ',', '') AS REAL) as discount,
+      TRY_CAST(REPLACE(json_extract_string(data, '$.discountLevel1'), ',', '') AS REAL) as discountLevel1,
+      TRY_CAST(REPLACE(json_extract_string(data, '$.discountLevel2'), ',', '') AS REAL) as discountLevel2,
       f.module_type,
-      (json_extract_string(data, '$.date') LIKE ? || '%') as inPeriod
+      (match_period(json_extract_string(data, '$.date'), ?)) as inPeriod
       FROM raw_data r JOIN files f ON r.file_id = f.id 
       WHERE f.module_type IN ('opening_inventory', 'purchases', 'purchase_returns', 'sales', 'sales_returns', 'inventory_adjustments') 
       ORDER BY date ASC, time ASC`, period);
@@ -2300,8 +2674,15 @@ app.get("/api/reports/profit", async (req, res) => {
        if (row.module_type === 'inventory_adjustments') {
            rawQty = row.adjQty || 0;
        }
-       const p = row.price || 0;
+       let p = row.price || 0;
        let totalP = row.totalPrice || (p * rawQty);
+       if (row.module_type === 'sales' || row.module_type === 'sales_returns') {
+           const disc = (row.discount || 0) + (row.discountLevel1 || 0) + (row.discountLevel2 || 0);
+           if (disc > 0 && rawQty > 0) {
+               p = p - (disc / rawQty);
+               totalP = totalP - disc;
+           }
+       }
 
        // MWA Calculation
        if (row.module_type === 'opening_inventory' || row.module_type === 'purchases') {
@@ -2460,10 +2841,10 @@ app.get("/api/reports/finance", async (req, res) => {
   const finAgg = (await db.all(
       `
     SELECT 
-      SUM(CASE WHEN json_extract_string(data, '$.transactionType') LIKE '%خروج%' OR CAST(json_extract_string(data, '$.amount') AS REAL) < 0 THEN ABS(CAST(json_extract_string(data, '$.amount') AS REAL)) ELSE 0 END) as outcome,
-      SUM(CASE WHEN NOT (json_extract_string(data, '$.transactionType') LIKE '%خروج%' OR CAST(json_extract_string(data, '$.amount') AS REAL) < 0) THEN ABS(CAST(json_extract_string(data, '$.amount') AS REAL)) ELSE 0 END) as income
+      SUM(CASE WHEN json_extract_string(data, '$.transactionType') LIKE '%خروج%' OR TRY_CAST(json_extract_string(data, '$.amount') AS REAL) < 0 THEN ABS(TRY_CAST(json_extract_string(data, '$.amount') AS REAL)) ELSE 0 END) as outcome,
+      SUM(CASE WHEN NOT (json_extract_string(data, '$.transactionType') LIKE '%خروج%' OR TRY_CAST(json_extract_string(data, '$.amount') AS REAL) < 0) THEN ABS(TRY_CAST(json_extract_string(data, '$.amount') AS REAL)) ELSE 0 END) as income
     FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type IN ('finance_cash', 'finance_bank')
-    AND json_extract_string(data, '$.date') LIKE ? || '%'
+    AND match_period(json_extract_string(data, '$.date'), ?)
   `, period))[0] as any;
 
   res.json({
@@ -2482,7 +2863,7 @@ app.get("/api/export-excel", async (req, res) => {
     const modFilter = mod === "sales" ? "IN ('sales', 'sales_returns')" : `= '${mod}'`;
     
     // Get all records for this module and period
-    const rawIt = await db.all(`SELECT data as raw_json, f.module_type FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type ${modFilter} AND json_extract_string(data, '$.date') LIKE ? || '%'`, period);
+    const rawIt = await db.all(`SELECT data as raw_json, f.module_type FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type ${modFilter} AND match_period(json_extract_string(data, '$.date'), ?)`, period);
     
     const rows: any[] = [];
     for (const r of rawIt) {
@@ -2509,11 +2890,11 @@ app.get("/api/reports/hr", async (req, res) => {
       coalesce(json_extract_string(data, '$.cashierCode'), json_extract_string(data, '$.costCenter'), 'نامشخص') as employee,
       json_extract_string(data, '$.date') as date,
       json_extract_string(data, '$.time') as time,
-      CAST(REPLACE(json_extract_string(data, '$.quantity'), ',', '') AS REAL) as qty,
-      CAST(json_extract_string(data, '$.price') AS REAL) as price, CAST(json_extract_string(data, '$.totalPrice') AS REAL) as totalPrice,
+      TRY_CAST(REPLACE(json_extract_string(data, '$.quantity'), ',', '') AS REAL) as qty,
+      TRY_CAST(json_extract_string(data, '$.price') AS REAL) as price, (coalesce(TRY_CAST(json_extract_string(data, '$.totalPrice') AS REAL), TRY_CAST(REPLACE(json_extract_string(data, '$.quantity'), ',', '') AS REAL) * TRY_CAST(json_extract_string(data, '$.price') AS REAL)) - coalesce(TRY_CAST(json_extract_string(data, '$.discount') AS REAL), 0) - coalesce(TRY_CAST(json_extract_string(data, '$.discountLevel1') AS REAL), 0) - coalesce(TRY_CAST(json_extract_string(data, '$.discountLevel2') AS REAL), 0)) as totalPrice,
       json_extract_string(data, '$.invoiceCode') as invCode
     FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type = 'sales'
-    AND json_extract_string(data, '$.date') LIKE ? || '%'
+    AND match_period(json_extract_string(data, '$.date'), ?)
   `
     , period) as any[];
 
@@ -2530,7 +2911,7 @@ app.get("/api/reports/hr", async (req, res) => {
       json_extract_string(data, '$.entranceTime') as entranceTime,
       json_extract_string(data, '$.exitTime') as exitTime
     FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type = 'hr'
-    AND json_extract_string(data, '$.date') LIKE ? || '%'
+    AND match_period(json_extract_string(data, '$.date'), ?)
   `, period) as any[];
 
   // Data maps
@@ -2809,12 +3190,12 @@ app.get("/api/reports/advanced-bi", async (req, res) => {
     salesData = await db.all(`
         SELECT 
           json_extract_string(data, '$.date') as date,
-          CAST(REPLACE(json_extract_string(data, '$.quantity'), ',', '') AS REAL) as qty,
-          CAST(json_extract_string(data, '$.price') AS REAL) as price, CAST(json_extract_string(data, '$.totalPrice') AS REAL) as totalPrice,
-          f.module_type
+          SUM(CASE WHEN f.module_type = 'sales' THEN (coalesce(TRY_CAST(json_extract_string(data, '$.totalPrice') AS REAL), TRY_CAST(REPLACE(json_extract_string(data, '$.quantity'), ',', '') AS REAL) * TRY_CAST(json_extract_string(data, '$.price') AS REAL)) - coalesce(TRY_CAST(json_extract_string(data, '$.discount') AS REAL), 0) - coalesce(TRY_CAST(json_extract_string(data, '$.discountLevel1') AS REAL), 0) - coalesce(TRY_CAST(json_extract_string(data, '$.discountLevel2') AS REAL), 0)) ELSE -(coalesce(TRY_CAST(json_extract_string(data, '$.totalPrice') AS REAL), TRY_CAST(REPLACE(json_extract_string(data, '$.quantity'), ',', '') AS REAL) * TRY_CAST(json_extract_string(data, '$.price') AS REAL)) - coalesce(TRY_CAST(json_extract_string(data, '$.discount') AS REAL), 0) - coalesce(TRY_CAST(json_extract_string(data, '$.discountLevel1') AS REAL), 0) - coalesce(TRY_CAST(json_extract_string(data, '$.discountLevel2') AS REAL), 0)) END) as totalAmt,
+          COUNT(*) as txCount
         FROM raw_data r JOIN files f ON r.file_id = f.id
         WHERE f.module_type IN ('sales', 'sales_returns')
-        AND json_extract_string(data, '$.date') LIKE ? || '%'
+        AND match_period(json_extract_string(data, '$.date'), ?)
+        GROUP BY 1
       `, period) as any[];
     
 
@@ -2872,7 +3253,8 @@ app.get("/api/reports/advanced-bi", async (req, res) => {
           json_extract_string(data, '$.productCode') as pCode
         FROM raw_data r JOIN files f ON r.file_id = f.id
         WHERE f.module_type = 'sales'
-        AND json_extract_string(data, '$.date') LIKE ? || '%'
+        AND match_period(json_extract_string(data, '$.date'), ?)
+        LIMIT 50000 
       `, period) as any[];
     
 
@@ -2910,12 +3292,12 @@ app.get("/api/reports/advanced-bi", async (req, res) => {
     const purchasesData = await db.all(`
       SELECT 
         json_extract_string(data, '$.supplier') as supplier,
-        CAST(REPLACE(json_extract_string(data, '$.quantity'), ',', '') AS REAL) as qty,
-        CAST(json_extract_string(data, '$.price') AS REAL) as price, CAST(json_extract_string(data, '$.totalPrice') AS REAL) as totalPrice,
+        TRY_CAST(REPLACE(json_extract_string(data, '$.quantity'), ',', '') AS REAL) as qty,
+        TRY_CAST(json_extract_string(data, '$.price') AS REAL) as price, (coalesce(TRY_CAST(json_extract_string(data, '$.totalPrice') AS REAL), TRY_CAST(REPLACE(json_extract_string(data, '$.quantity'), ',', '') AS REAL) * TRY_CAST(json_extract_string(data, '$.price') AS REAL)) - coalesce(TRY_CAST(json_extract_string(data, '$.discount') AS REAL), 0) - coalesce(TRY_CAST(json_extract_string(data, '$.discountLevel1') AS REAL), 0) - coalesce(TRY_CAST(json_extract_string(data, '$.discountLevel2') AS REAL), 0)) as totalPrice,
         f.module_type
       FROM raw_data r JOIN files f ON r.file_id = f.id
       WHERE f.module_type IN ('purchases', 'purchase_returns')
-      AND json_extract_string(data, '$.date') LIKE ? || '%'
+      AND match_period(json_extract_string(data, '$.date'), ?)
     `, period) as any[];
 
     const supplierMap: Record<string, { name: string; purchaseAmt: number; returnAmt: number; returnQty: number; purchaseQty: number }> = {};
@@ -2954,7 +3336,7 @@ app.get("/api/reports/advanced-bi", async (req, res) => {
     const openingStock = await db.all(`
       SELECT 
         json_extract_string(data, '$.productCode') as code, json_extract_string(data, '$.productName') as name,
-        SUM(CAST(REPLACE(json_extract_string(data, '$.quantity'), ',', '') AS REAL)) as qty
+        SUM(TRY_CAST(REPLACE(json_extract_string(data, '$.quantity'), ',', '') AS REAL)) as qty
       FROM raw_data r JOIN files f ON r.file_id = f.id
       WHERE f.module_type = 'opening_inventory'
       GROUP BY 1, 2
@@ -2969,11 +3351,11 @@ app.get("/api/reports/advanced-bi", async (req, res) => {
     const prodPurch = await db.all(`
       SELECT 
         json_extract_string(data, '$.productCode') as code, json_extract_string(data, '$.productName') as name,
-        SUM(CASE WHEN f.module_type = 'purchases' THEN CAST(REPLACE(json_extract_string(data, '$.quantity'), ',', '') AS REAL) ELSE -CAST(REPLACE(json_extract_string(data, '$.quantity'), ',', '') AS REAL) END) as qty,
-        SUM(CASE WHEN f.module_type = 'purchases' THEN coalesce(CAST(json_extract_string(data, '$.totalPrice') AS REAL), CAST(REPLACE(json_extract_string(data, '$.quantity'), ',', '') AS REAL) * CAST(json_extract_string(data, '$.price') AS REAL)) ELSE 0 END) as totalAmt
+        SUM(CASE WHEN f.module_type = 'purchases' THEN TRY_CAST(REPLACE(json_extract_string(data, '$.quantity'), ',', '') AS REAL) ELSE -TRY_CAST(REPLACE(json_extract_string(data, '$.quantity'), ',', '') AS REAL) END) as qty,
+        SUM(CASE WHEN f.module_type = 'purchases' THEN (coalesce(TRY_CAST(json_extract_string(data, '$.totalPrice') AS REAL), TRY_CAST(REPLACE(json_extract_string(data, '$.quantity'), ',', '') AS REAL) * TRY_CAST(json_extract_string(data, '$.price') AS REAL)) - coalesce(TRY_CAST(json_extract_string(data, '$.discount') AS REAL), 0) - coalesce(TRY_CAST(json_extract_string(data, '$.discountLevel1') AS REAL), 0) - coalesce(TRY_CAST(json_extract_string(data, '$.discountLevel2') AS REAL), 0)) ELSE 0 END) as totalAmt
       FROM raw_data r JOIN files f ON r.file_id = f.id
       WHERE f.module_type IN ('purchases', 'purchase_returns')
-      AND json_extract_string(data, '$.date') LIKE ? || '%'
+      AND match_period(json_extract_string(data, '$.date'), ?)
       GROUP BY 1, 2
     `, period) as any[];
     const purchMap: Record<string, { qty: number; amt: number }> = {};
@@ -2986,11 +3368,11 @@ app.get("/api/reports/advanced-bi", async (req, res) => {
     const prodSales = await db.all(`
       SELECT 
         json_extract_string(data, '$.productCode') as code, json_extract_string(data, '$.productName') as name,
-        SUM(CASE WHEN f.module_type = 'sales' THEN CAST(REPLACE(json_extract_string(data, '$.quantity'), ',', '') AS REAL) ELSE -CAST(REPLACE(json_extract_string(data, '$.quantity'), ',', '') AS REAL) END) as qty,
-        SUM(CASE WHEN f.module_type = 'sales' THEN coalesce(CAST(json_extract_string(data, '$.totalPrice') AS REAL), CAST(REPLACE(json_extract_string(data, '$.quantity'), ',', '') AS REAL) * CAST(json_extract_string(data, '$.price') AS REAL)) ELSE 0 END) as totalAmt
+        SUM(CASE WHEN f.module_type = 'sales' THEN TRY_CAST(REPLACE(json_extract_string(data, '$.quantity'), ',', '') AS REAL) ELSE -TRY_CAST(REPLACE(json_extract_string(data, '$.quantity'), ',', '') AS REAL) END) as qty,
+        SUM(CASE WHEN f.module_type = 'sales' THEN (coalesce(TRY_CAST(json_extract_string(data, '$.totalPrice') AS REAL), TRY_CAST(REPLACE(json_extract_string(data, '$.quantity'), ',', '') AS REAL) * TRY_CAST(json_extract_string(data, '$.price') AS REAL)) - coalesce(TRY_CAST(json_extract_string(data, '$.discount') AS REAL), 0) - coalesce(TRY_CAST(json_extract_string(data, '$.discountLevel1') AS REAL), 0) - coalesce(TRY_CAST(json_extract_string(data, '$.discountLevel2') AS REAL), 0)) ELSE 0 END) as totalAmt
       FROM raw_data r JOIN files f ON r.file_id = f.id
       WHERE f.module_type IN ('sales', 'sales_returns')
-      AND json_extract_string(data, '$.date') LIKE ? || '%'
+      AND match_period(json_extract_string(data, '$.date'), ?)
       GROUP BY 1, 2
     `, period) as any[];
 
@@ -3044,21 +3426,22 @@ app.get("/api/reports/advanced-bi", async (req, res) => {
 
 // 4. Delete File and its Data
 app.delete("/api/files/:id", (req, res, next) => { clearCache(); next(); }, async (req, res) => {
-  const fileId = req.params.id;
-
-  // Get filename to delete from disk
-  const fileRecord = (await db.all("SELECT filename FROM files WHERE id = ?", fileId))[0] as { filename: string } | undefined;
-
-  if (fileRecord) {
-    const filePath = path.join(UPLOADS_DIR, fileRecord.filename);
-    if (fs.existsSync(filePath)) {
-      fs.unlinkSync(filePath);
-    }
+  try {
+      const fileId = req.params.id;
+      const fileRecord = (await db.all("SELECT filename FROM files WHERE id = ?", fileId))[0];
+      if (fileRecord) {
+        const filePath = path.join(UPLOADS_DIR, fileRecord.filename);
+        if (fs.existsSync(filePath)) {
+          try { fs.unlinkSync(filePath); } catch (e) {}
+        }
+      }
+      await db.run("DELETE FROM raw_data WHERE file_id = ?", fileId);
+      await db.run("DELETE FROM files WHERE id = ?", fileId);
+      res.json({ message: "فایل حذف شد." });
+  } catch (e) {
+      console.error(e);
+      res.status(500).json({ error: "خطا در حذف فایل" });
   }
-
-  // Delete from DB (CASCADE will handle raw_data)
-  await db.all("DELETE FROM files WHERE id = ?", fileId);
-  res.json({ message: "فایل حذف شد." });
 });
 
 // ================= BUDGET APIs ================= //
@@ -3106,11 +3489,11 @@ app.get("/api/reports/budget-variance", async (req, res) => {
 
         // Actual values calculation based on module_type and category matching
         // Simple logic: we'll aggregate actuals matching the budget type/category
-        const actualSalesQuery = await db.all("SELECT CAST(REPLACE(json_extract_string(data, '$.totalPrice'), ',', '') AS REAL) as total, json_extract_string(data, '$.productName') as pName, json_extract_string(data, '$.productCode') as pCode, json_extract_string(data, '$.category') as cat FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type = 'sales' AND json_extract_string(data, '$.date') LIKE ? || '%'", period);
+        const actualSalesQuery = await db.all("SELECT TRY_CAST(REPLACE(json_extract_string(data, '$.totalPrice'), ',', '') AS REAL) as total, json_extract_string(data, '$.productName') as pName, json_extract_string(data, '$.productCode') as pCode, json_extract_string(data, '$.category') as cat FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type = 'sales' AND match_period(json_extract_string(data, '$.date'), ?)", period);
         
-        const actualPurchasesQuery = await db.all("SELECT CAST(REPLACE(json_extract_string(data, '$.totalPrice'), ',', '') AS REAL) as total, json_extract_string(data, '$.productName') as pName, json_extract_string(data, '$.productCode') as pCode, json_extract_string(data, '$.category') as cat FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type = 'purchases' AND json_extract_string(data, '$.date') LIKE ? || '%'", period);
+        const actualPurchasesQuery = await db.all("SELECT TRY_CAST(REPLACE(json_extract_string(data, '$.totalPrice'), ',', '') AS REAL) as total, json_extract_string(data, '$.productName') as pName, json_extract_string(data, '$.productCode') as pCode, json_extract_string(data, '$.category') as cat FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type = 'purchases' AND match_period(json_extract_string(data, '$.date'), ?)", period);
 
-        const actualFinanceQuery = await db.all("SELECT CAST(REPLACE(json_extract_string(data, '$.amount'), ',', '') AS REAL) as total, json_extract_string(data, '$.category') as cat FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type = 'finance_expense' AND json_extract_string(data, '$.date') LIKE ? || '%'", period);
+        const actualFinanceQuery = await db.all("SELECT TRY_CAST(REPLACE(json_extract_string(data, '$.amount'), ',', '') AS REAL) as total, json_extract_string(data, '$.category') as cat FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type = 'finance_expense' AND match_period(json_extract_string(data, '$.date'), ?)", period);
 
         let totalSales = 0;
         let totalPurchases = 0;
@@ -3163,7 +3546,7 @@ app.get("/api/reports/forecast", async (req, res) => {
     try {
         const period = (req.query.period as string) || "";
         // Very basic forecasting logic based on daily sales trends
-        const salesData = await db.all("SELECT json_extract_string(data, '$.date') as date, SUM(CAST(REPLACE(json_extract_string(data, '$.totalPrice'), ',', '') AS REAL)) as dailyTotal FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type = 'sales' AND json_extract_string(data, '$.date') LIKE ? || '%' GROUP BY date ORDER BY date ASC", period) as any[];
+        const salesData = await db.all("SELECT json_extract_string(data, '$.date') as date, SUM(TRY_CAST(REPLACE(json_extract_string(data, '$.totalPrice'), ',', '') AS REAL)) as dailyTotal FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type = 'sales' AND match_period(json_extract_string(data, '$.date'), ?) GROUP BY date ORDER BY date ASC", period) as any[];
         
         let movingAverage = 0;
         let sum = 0;
@@ -3201,14 +3584,14 @@ app.get("/api/reports/breakeven", async (req, res) => {
         const period = (req.query.period as string) || "";
         
         // Sum total fixed costs (using finance_expense module where expenseType is fixed)
-        const expenses = (await db.all("SELECT SUM(CAST(REPLACE(json_extract_string(data, '$.amount'), ',', '') AS REAL)) as total FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type = 'finance_expense' AND (json_extract_string(data, '$.expenseType') = 'ثابت' OR json_extract_string(data, '$.expenseType') IS NULL) AND json_extract_string(data, '$.date') LIKE ? || '%'", period))[0] as any;
+        const expenses = (await db.all("SELECT SUM(TRY_CAST(REPLACE(json_extract_string(data, '$.amount'), ',', '') AS REAL)) as total FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type = 'finance_expense' AND (json_extract_string(data, '$.expenseType') = 'ثابت' OR json_extract_string(data, '$.expenseType') IS NULL) AND match_period(json_extract_string(data, '$.date'), ?)", period))[0] as any;
         const fixedCosts = expenses?.total || 0;
 
         // Get aggregate sales and purchase to find average Contribution Margin Ratio
-        const sales = (await db.all("SELECT SUM(CAST(REPLACE(json_extract_string(data, '$.totalPrice'), ',', '') AS REAL)) as total FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type = 'sales' AND json_extract_string(data, '$.date') LIKE ? || '%'", period))[0] as any;
+        const sales = (await db.all("SELECT SUM(TRY_CAST(REPLACE(json_extract_string(data, '$.totalPrice'), ',', '') AS REAL)) as total FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type = 'sales' AND match_period(json_extract_string(data, '$.date'), ?)", period))[0] as any;
         const totalSales = sales?.total || 0;
 
-        const purchases = (await db.all("SELECT SUM(CAST(REPLACE(json_extract_string(data, '$.totalPrice'), ',', '') AS REAL)) as total FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type = 'purchases' AND json_extract_string(data, '$.date') LIKE ? || '%'", period))[0] as any;
+        const purchases = (await db.all("SELECT SUM(TRY_CAST(REPLACE(json_extract_string(data, '$.totalPrice'), ',', '') AS REAL)) as total FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type = 'purchases' AND match_period(json_extract_string(data, '$.date'), ?)", period))[0] as any;
         const totalCOGS = purchases?.total || 0;
 
         let cmRatio = 0.3; // Default 30% margin if no data
@@ -3253,9 +3636,9 @@ app.get("/api/reports/cost-trends", async (req, res) => {
             SELECT 
                 json_extract_string(data, '$.date') as date,
                 json_extract_string(data, '$.productCode') as code, json_extract_string(data, '$.productName') as name,
-                CAST(REPLACE(json_extract_string(data, '$.price'), ',', '') AS REAL) as unitPrice
+                TRY_CAST(REPLACE(json_extract_string(data, '$.price'), ',', '') AS REAL) as unitPrice
             FROM raw_data r JOIN files f ON r.file_id = f.id 
-            WHERE f.module_type = 'purchases' AND json_extract_string(data, '$.date') LIKE ? || '%'
+            WHERE f.module_type = 'purchases' AND match_period(json_extract_string(data, '$.date'), ?)
             ORDER BY date ASC
         `, period) as any[];
 

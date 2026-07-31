@@ -1,0 +1,50 @@
+--- server.ts
++++ server.ts
+@@ -1519,25 +1519,16 @@
+       FROM raw_data r JOIN files f ON r.file_id = f.id 
+-      WHERE f.module_type IN ('sales', 'purchases', ${netMode ? "'sales_returns'" : "'sales'"},     // Get all available accounts globally
+-    const financeRows = await db.all("SELECT DISTINCT json_extract_string(data, '$.account') as account FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type = 'finance_expense'");
++      WHERE f.module_type IN ('sales', 'purchases', ${netMode ? "'sales_returns'" : "'sales'"}, ${netMode ? "'purchase_returns'" : "'purchases'"})
++      AND match_period(json_extract_string(data, '$.date'), ?)
++      GROUP BY code, f.module_type
++    `
++      , salesPeriod);
++
++    // 5. Get cost centers
++    const allCostCenters = await db.all("SELECT * FROM cost_centers") as any[];
++    // Filter out inactive cost centers for calculation
++    const costCenters = allCostCenters.filter(cc => cc.is_active === 1 || cc.is_active === undefined || cc.is_active === true);
++
++    
++    const allSyncedCentersRows = await db.all("SELECT json_extract_string(data, '$.costCenter') as cc FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type = 'finance_expense'");
++    const allSyncedCenters = new Set(
++        allSyncedCentersRows.map((r) => r.cc?.trim()).filter(Boolean)
++    );
++
++    // Get all available accounts globally
++    const financeRows = await db.all("SELECT DISTINCT json_extract_string(data, '$.account') as account FROM raw_data r JOIN files f ON r.file_id = f.id WHERE f.module_type = 'finance_expense'");
+     const allAccounts = new Set<string>();
+     for (const r of financeRows as any[]) {
+        const acc = r.account?.trim();
+@@ -1563,16 +1554,0 @@
+-            }
+-
+-            const amount = Number(row.amount);
+-            const tType = row.transactionType ? String(row.transactionType).trim() : "";
+-            if (tType && (tType.includes("ورود") || tType.includes("دریافت") || tType.includes("درآمد") || tType.includes("واریز"))) {
+-                continue;
+-            }
+-
+-            if (!isNaN(amount)) {
+-                periodCostsByCenter[center] = (periodCostsByCenter[center] || 0) + amount;
+-            }
+-        }
+-    }allowedAccounts = centerConfig.source_accounts.split(',').filter(Boolean);
+-                 if (allowedAccounts.length > 0 && !allowedAccounts.includes(account)) {
+-                     continue; // Skip this row, its account is not selected
+-                 }
+@@ -1580,2 +1556,2 @@
+-            const amount = parseFloat(String(parsed.amount || "").replace(/,/g, ''));
+-            const tType = parsed.transactionType ? String(parsed.transactionType).trim() : "";
++            const amount = Number(row.amount);
++            const tType = row.transactionType ? String(row.transactionType).trim() : "";
